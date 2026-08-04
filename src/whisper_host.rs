@@ -22,6 +22,7 @@ pub struct TimingBreakdown {
 }
 
 unsafe impl Send for WhisperContext {}
+unsafe impl Sync for WhisperContext {}
 
 impl WhisperContext {
     pub fn init_from_file(path: &str) -> Result<Self, String> {
