@@ -1,0 +1,7 @@
+target/
+node_modules/
+models/
+third_party/
+pkg/
+*.bin
+tests/fixtures/*.wav
