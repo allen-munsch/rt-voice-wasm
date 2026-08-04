@@ -23,7 +23,7 @@ fn main() {
     let common_defines = [
         ("GGML_USE_CPU", None),
         ("WHISPER_VERSION", Some("\"1.9.1\"")),
-        ("GGML_SCHED_MAX_COPIES", Some("4")),
+        ("GGML_SCHED_MAX_COPIES", Some("2")),
         ("GGML_VERSION", Some("\"1.9.1\"")),
         ("GGML_COMMIT", Some("\"unknown\"")),
         ("GGML_USE_CPU_REPACK", None),
@@ -34,6 +34,9 @@ fn main() {
     c_build
         .flag_if_supported("-std=c11")
         .flag_if_supported("-pthread")
+        .flag_if_supported("-march=native")
+        .flag_if_supported("-ffast-math")
+        .flag_if_supported("-fno-finite-math-only")
         .define("_GNU_SOURCE", None);
     for (name, val) in &common_defines {
         c_build.define(name, *val);
@@ -61,7 +64,10 @@ fn main() {
     cpp_build
         .cpp(true)
         .flag_if_supported("-std=c++17")
-        .flag_if_supported("-pthread");
+        .flag_if_supported("-pthread")
+        .flag_if_supported("-march=native")
+        .flag_if_supported("-ffast-math")
+        .flag_if_supported("-fno-finite-math-only");
     for (name, val) in &common_defines {
         cpp_build.define(name, *val);
     }
@@ -120,6 +126,8 @@ fn main() {
         .allowlist_function("whisper_full_get_segment_t0")
         .allowlist_function("whisper_full_get_segment_t1")
         .allowlist_function("whisper_context_default_params")
+        .allowlist_function("whisper_print_timings")
+        .allowlist_function("whisper_reset_timings")
         .allowlist_type("whisper_context_params")
         .allowlist_type("whisper_full_params")
         .generate()

@@ -55,6 +55,31 @@ pub fn downsample_to_16k(samples: &[f32], input_rate: u32) -> Vec<i16> {
     out
 }
 
+/// Speed up audio by a factor (1.5 = 50% faster, 2.0 = double speed).
+/// Uses linear interpolation for fractional resampling.
+/// Output length is input.len() / factor.
+pub fn speedup(samples: &[i16], factor: f64) -> Vec<i16> {
+    if factor <= 1.0 || samples.is_empty() {
+        return samples.to_vec();
+    }
+    let out_len = (samples.len() as f64 / factor).round() as usize;
+    let mut out = Vec::with_capacity(out_len.max(1));
+    let len = samples.len();
+    for i in 0..out_len {
+        let src = i as f64 * factor;
+        let idx = src as usize;
+        let frac = src - idx as f64;
+        let a = samples[idx] as f64;
+        let b = if idx + 1 < len {
+            samples[idx + 1] as f64
+        } else {
+            a
+        };
+        out.push((a + (b - a) * frac) as i16);
+    }
+    out
+}
+
 /// Decode G.711 μ-law byte to 16-bit linear PCM.
 pub fn mulaw_decode(mulaw: u8) -> i16 {
     const BIAS: u32 = 33;
@@ -143,5 +168,25 @@ mod tests {
         let input: Vec<f32> = vec![0.5; 48000];
         let out = downsample_to_16k(&input, 48000);
         assert_eq!(out.len(), 16000);
+    }
+
+    #[test]
+    fn speedup_double_halves_length() {
+        let input: Vec<i16> = (0..1000).map(|i| (i % 256) as i16).collect();
+        let out = speedup(&input, 2.0);
+        assert_eq!(out.len(), 500);
+    }
+
+    #[test]
+    fn speedup_one_is_passthrough() {
+        let input = vec![100i16, 200, 300];
+        let out = speedup(&input, 1.0);
+        assert_eq!(out, input);
+    }
+
+    #[test]
+    fn speedup_empty() {
+        let out = speedup(&[], 2.0);
+        assert!(out.is_empty());
     }
 }

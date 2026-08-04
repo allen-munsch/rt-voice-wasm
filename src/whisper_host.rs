@@ -46,17 +46,22 @@ impl WhisperContext {
         let mut params = unsafe {
             whisper_full_default_params(whisper_sampling_strategy_WHISPER_SAMPLING_GREEDY)
         };
-        params.n_threads = n_threads.min(4);
+        params.n_threads = n_threads.min(8);
         params.print_progress = false;
         params.print_realtime = false;
         params.print_timestamps = false;
-        params.no_timestamps = false;
-        params.language = std::ptr::null();
+        params.no_timestamps = true;
+        params.single_segment = true;
+        params.suppress_blank = true;
+        params.suppress_nst = true;
+        params.temperature = 0.0f32;
+        params.language = b"en\0".as_ptr() as *const std::ffi::c_char;
 
         // Limit encoder to only the audio we actually have, not full 30s context
         let remaining_s = (audio_duration_s.ceil() as i32).max(1);
         params.duration_ms = (remaining_s * 1000).min(30_000);
 
+        unsafe { whisper_reset_timings(self.inner) };
         let t0 = Instant::now();
         let ret = unsafe { whisper_full(self.inner, params, f32_samples.as_ptr(), n_samples) };
         let total_ms = t0.elapsed().as_secs_f64() * 1000.0;
