@@ -16,6 +16,7 @@
 
 use rt_voice_wasm::agent::{default_rules, IntentRouter, ProcessAgent};
 use rt_voice_wasm::call::{CallConfig, CallHandler};
+use rt_voice_wasm::engine::SttEngine;
 use rt_voice_wasm::transport::{AudioTransport, RawWsTransport, TwilioTransport};
 use rt_voice_wasm::whisper::WhisperContext;
 
@@ -43,7 +44,7 @@ struct Config {
 fn parse_args() -> Config {
     let args: Vec<String> = std::env::args().collect();
     let mut cfg = Config {
-        model: "models/ggml-tiny.en-q5_1.bin".into(),
+        model: "models/ggml-base.en-q5_1.bin".into(),
         port: 8080,
         speed: 1.0,
         provider: Provider::Twilio,
@@ -170,7 +171,7 @@ async fn main() {
     let cfg = parse_args();
 
     eprintln!("[model] loading from {}...", cfg.model);
-    let ctx = Arc::new(
+    let ctx: Arc<dyn SttEngine> = Arc::new(
         WhisperContext::init_from_file(&cfg.model).expect("failed to load whisper model"),
     );
 
@@ -217,7 +218,10 @@ async fn main() {
             let agent: Box<dyn rt_voice_wasm::agent::Agent> = if let Some(ref hook) = agent_hook
             {
                 match ProcessAgent::spawn(hook) {
-                    Ok(pa) => Box::new(pa),
+                    Ok(pa) => {
+                        eprintln!("[agent] using external process: {hook}");
+                        Box::new(pa)
+                    }
                     Err(e) => {
                         eprintln!("[agent] spawn failed: {e}, using builtin");
                         Box::new(IntentRouter::new(default_rules()))

@@ -6,6 +6,7 @@
 //! - `ProcessAgent` — spawns an external process (dirge-code, pi, shell script)
 
 use std::io::Write;
+use std::sync::mpsc::{self, Receiver};
 
 #[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum Action {
@@ -87,13 +88,18 @@ impl<F: Fn(&str) -> Action + Send + Sync> Agent for FnAgent<F> {
 /// Example: `rt-voice-server --agent-hook 'python3 my_router.py'`
 /// where `my_router.py` reads stdin and writes JSON actions to stdout.
 pub struct ProcessAgent {
-    child: std::sync::Mutex<std::process::Child>,
     stdin: std::sync::Mutex<std::process::ChildStdin>,
+    rx: std::sync::Mutex<Receiver<Action>>,
+    _child: std::sync::Mutex<std::process::Child>,
 }
 
 impl ProcessAgent {
     /// Spawn a command. The command string is split by whitespace; use quotes
     /// for multi-word args (e.g. `--agent-hook 'python3 my_script.py --flag'`).
+    ///
+    /// A background thread reads stdout lines and pushes parsed Actions into an
+    /// mpsc channel. `route()` does non-blocking `try_recv()` so the call handler
+    /// never blocks waiting for the LLM.
     pub fn spawn(cmd: &str) -> Result<Self, String> {
         let parts: Vec<&str> = shell_words(cmd);
         let mut child = std::process::Command::new(parts[0])
@@ -109,41 +115,95 @@ impl ProcessAgent {
             .take()
             .ok_or_else(|| "no stdin".to_string())?;
 
+        let stdout = child
+            .stdout
+            .take()
+            .ok_or_else(|| "no stdout".to_string())?;
+
+        let (tx, rx) = mpsc::channel();
+
+        std::thread::spawn(move || {
+            use std::io::{BufRead, BufReader};
+            let reader = BufReader::new(stdout);
+            for line in reader.lines() {
+                match line {
+                    Ok(l) => {
+                        let action = Self::parse_action(&l);
+                        if tx.send(action).is_err() {
+                            break;
+                        }
+                    }
+                    Err(_) => break,
+                }
+            }
+        });
+
         Ok(ProcessAgent {
-            child: std::sync::Mutex::new(child),
             stdin: std::sync::Mutex::new(stdin),
+            rx: std::sync::Mutex::new(rx),
+            _child: std::sync::Mutex::new(child),
         })
     }
 }
 
 impl Agent for ProcessAgent {
     fn route(&self, text: &str) -> Action {
-        // Send transcript to the process
-        {
-            let mut stdin = match self.stdin.lock() {
-                Ok(g) => g,
-                Err(_) => return Action::Continue,
-            };
+        // Write transcript to child stdin
+        if let Ok(mut stdin) = self.stdin.lock() {
             let _ = writeln!(stdin, "{text}");
             let _ = stdin.flush();
         }
 
-        // We don't synchronously wait for a response — that would block.
-        // In practice, the call handler polls. For a synchronous agent hook,
-        // we return Continue and the external process feeds decisions via
-        // a side-channel (file, socket, HTTP). For a lightweight built-in
-        // process, override this with tokio-based async I/O.
-        //
-        // The intent: dirge-code/dirge or pi reads context from stdin and
-        // writes decisions. The call handler accumulates transcript; the
-        // external process has the full picture.
+        // Non-blocking: return any pending action from the background reader
+        if let Ok(rx) = self.rx.lock() {
+            rx.try_recv().unwrap_or(Action::Continue)
+        } else {
+            Action::Continue
+        }
+    }
+}
+
+impl ProcessAgent {
+    fn parse_action(line: &str) -> Action {
+        let line = line.trim();
+        if line.is_empty() {
+            return Action::Continue;
+        }
+
+        // Try outer wrapper first (dirge --output-format json)
+        if let Ok(wrapper) = serde_json::from_str::<serde_json::Value>(line) {
+            if let Some(inner) = wrapper.get("result").and_then(|v| v.as_str()) {
+                return Self::parse_inner(inner);
+            }
+        }
+
+        // Try raw action JSON directly
+        Self::parse_inner(line)
+    }
+
+    fn parse_inner(json: &str) -> Action {
+        let json = json.trim();
+        if let Ok(obj) = serde_json::from_str::<serde_json::Value>(json) {
+            if let Some(reply) = obj.get("Respond").and_then(|v| v.as_str()) {
+                return Action::Respond(reply.to_string());
+            }
+            if let Some(dest) = obj.get("Transfer").and_then(|v| v.as_str()) {
+                return Action::Transfer(dest.to_string());
+            }
+            if let Some(reason) = obj.get("Escalate").and_then(|v| v.as_str()) {
+                return Action::Escalate(reason.to_string());
+            }
+            if obj.get("Hangup").is_some() {
+                return Action::Hangup;
+            }
+        }
         Action::Continue
     }
 }
 
 impl Drop for ProcessAgent {
     fn drop(&mut self) {
-        let _ = self.child.lock().ok().and_then(|mut c| c.kill().ok());
+        let _ = self._child.lock().ok().and_then(|mut c| c.kill().ok());
     }
 }
 
@@ -235,5 +295,60 @@ mod tests {
         let router = IntentRouter::new(default_rules());
         let result = router.route("thank you so much goodbye");
         assert!(matches!(result, Action::Respond(_)));
+    }
+
+    #[test]
+    fn process_agent_parse_raw_action() {
+        assert!(matches!(
+            ProcessAgent::parse_action("{\"Transfer\": \"support\"}"),
+            Action::Transfer(ref d) if d == "support"
+        ));
+    }
+
+    #[test]
+    fn process_agent_with_dirge_wrapper() {
+        let agent =
+            ProcessAgent::spawn("./scripts/dirge-agent.sh").expect("spawn wrapper");
+
+        // Send transcript; route() is non-blocking now
+        let result = agent.route("I want to speak to an agent please");
+        // First call returns Continue (LLM hasn't responded yet)
+        assert!(matches!(result, Action::Continue));
+
+        // Poll for the LLM response (up to 30s)
+        for _ in 0..60 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let action = agent.route("");
+            if !matches!(action, Action::Continue) {
+                assert!(matches!(action, Action::Transfer(ref d) if d == "agent"));
+                return;
+            }
+        }
+        panic!("dirge agent did not respond within 30s");
+    }
+
+    #[test]
+    fn process_agent_parse_dirge_wrapper() {
+        let json = r#"{"type":"result","result":"{\"Respond\": \"hello\"}","duration_ms":100}"#;
+        assert!(matches!(
+            ProcessAgent::parse_action(json),
+            Action::Respond(ref r) if r == "hello"
+        ));
+    }
+
+    #[test]
+    fn process_agent_parse_hangup() {
+        assert!(matches!(
+            ProcessAgent::parse_action("{\"Hangup\": null}"),
+            Action::Hangup
+        ));
+    }
+
+    #[test]
+    fn process_agent_parse_empty_returns_continue() {
+        assert!(matches!(
+            ProcessAgent::parse_action(""),
+            Action::Continue
+        ));
     }
 }

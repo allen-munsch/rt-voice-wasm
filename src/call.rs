@@ -4,9 +4,9 @@
 
 use crate::agent::{Action, Agent};
 use crate::audio::speedup;
+use crate::engine::SttEngine;
 use crate::stream::StreamingPipeline;
 use crate::transport::{AudioTransport, Event};
-use crate::whisper::WhisperContext;
 
 use std::sync::Arc;
 
@@ -50,7 +50,7 @@ pub enum CallState {
 pub struct CallHandler {
     transport: Box<dyn AudioTransport>,
     pipeline: StreamingPipeline,
-    ctx: Arc<WhisperContext>,
+    ctx: Arc<dyn SttEngine>,
     agent: Box<dyn Agent>,
     config: CallConfig,
     state: CallState,
@@ -60,7 +60,7 @@ pub struct CallHandler {
 impl CallHandler {
     pub fn new(
         transport: Box<dyn AudioTransport>,
-        ctx: Arc<WhisperContext>,
+        ctx: Arc<dyn SttEngine>,
         agent: Box<dyn Agent>,
         config: CallConfig,
     ) -> Self {
@@ -80,7 +80,7 @@ impl CallHandler {
         let _ = self.transport.send_event(&Event::state("greeting")).await;
         let _ = self
             .transport
-            .send_event(&Event::agent_action(&self.config.greeting))
+            .send_event(&Event::agent_action(&format!("respond: {}", self.config.greeting)))
             .await;
 
         while let Some(chunk) = self.transport.recv_audio().await {
@@ -88,12 +88,8 @@ impl CallHandler {
                 let sped = speedup(&window, self.pipeline.speed_factor());
 
                 match self.ctx.transcribe(&sped) {
-                    Ok((segments, _timing)) => {
-                        let text: String = segments
-                            .iter()
-                            .map(|s| s.text.as_str())
-                            .collect::<Vec<_>>()
-                            .join(" ");
+                    Ok(texts) => {
+                        let text: String = texts.join(" ");
                         let merged = self.pipeline.merge_overlap(&text);
 
                         if !merged.is_empty() {
@@ -137,7 +133,7 @@ impl CallHandler {
                 match &action {
                     Action::Continue => {}
                     Action::Respond(reply) => {
-                        self.state = CallState::Responding;
+                        // Stay in Routing so the conversation continues
                         let _ = self
                             .transport
                             .send_event(&Event::agent_action(&format!("respond: {reply}")))

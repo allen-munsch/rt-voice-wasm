@@ -1,6 +1,7 @@
 pub mod audio;
 pub mod stream;
 pub mod agent;
+pub mod engine;
 
 #[cfg(not(target_arch = "wasm32"))]
 pub mod transport;

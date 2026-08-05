@@ -25,7 +25,7 @@ impl StreamingPipeline {
     }
 
     pub fn with_speed(sample_rate: u32, speed_factor: f64) -> Self {
-        let window_secs = 2; // 2s window for phone latency
+        let window_secs = 3; // 3s window — enough context for whisper, fast first response
         let step_secs = 1;   // 1s step
         let window_samples = (sample_rate as f64 * window_secs as f64) as usize;
         let step_samples = (sample_rate as f64 * step_secs as f64) as usize;
@@ -44,6 +44,9 @@ impl StreamingPipeline {
         self.buffer.extend_from_slice(samples);
         if self.buffer.len() >= self.window_samples {
             let window: Vec<i16> = self.buffer[self.buffer.len() - self.window_samples..].to_vec();
+            // Slide: keep overlap portion for next window
+            let keep = self.buffer.len() - self.step_samples;
+            self.buffer = self.buffer.split_off(keep);
             let rms = self.compute_rms(&window);
             if rms < self.rms_threshold {
                 return None;
@@ -71,9 +74,12 @@ impl StreamingPipeline {
         let prev_words: Vec<&str> = self.last_output.split_whitespace().collect();
         let mut best_overlap = 0usize;
         for overlap_len in 1..=words.len().min(prev_words.len()).min(8) {
-            let w_tail = &words[..overlap_len];
-            let p_tail = &prev_words[prev_words.len() - overlap_len..];
-            if w_tail == p_tail {
+            let w_tail: Vec<&str> = words[..overlap_len].iter().map(|s| *s).collect();
+            let p_tail: Vec<&str> = prev_words[prev_words.len() - overlap_len..].iter().map(|s| *s).collect();
+            let matched = w_tail.iter().zip(&p_tail).all(|(a, b)| {
+                a.eq_ignore_ascii_case(b)
+            });
+            if matched {
                 best_overlap = overlap_len;
             }
         }
@@ -110,10 +116,10 @@ mod tests {
     #[test]
     fn loud_stream_produces_window() {
         let mut pipeline = StreamingPipeline::new(16000);
-        let loud = vec![16000i16; 32000];
+        let loud = vec![16000i16; 80000]; // 5s of audio, 3s window → slides
         let result = pipeline.push_frame(&loud);
         assert!(result.is_some());
-        assert_eq!(result.unwrap().len(), 32000);
+        assert_eq!(result.unwrap().len(), 48000); // window_samples = 16000 * 3
     }
 
     #[test]

@@ -1,3 +1,4 @@
+use crate::engine::SttEngine;
 use std::ffi::{CStr, CString};
 use std::time::Instant;
 
@@ -92,6 +93,13 @@ impl WhisperContext {
             ..Default::default()
         };
         Ok((segments, timing))
+    }
+}
+
+impl SttEngine for WhisperContext {
+    fn transcribe(&self, samples: &[i16]) -> Result<Vec<String>, String> {
+        let (segments, _timing) = self.transcribe(samples)?;
+        Ok(segments.into_iter().map(|s| s.text).collect())
     }
 }
 

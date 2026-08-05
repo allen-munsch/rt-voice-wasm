@@ -1,0 +1,181 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Phone Receptionist — Live Test</title>
+<style>
+  body { font-family: system-ui, sans-serif; max-width: 700px; margin: 2rem auto; padding: 0 1rem; }
+  h1 { font-size: 1.3rem; }
+  #status { color: #666; font-size: 0.85rem; margin-bottom: 0.5rem; }
+  #events { min-height: 300px; max-height: 500px; overflow-y: auto; border: 1px solid #ccc; border-radius: 6px; padding: 1rem; font-size: 0.95rem; line-height: 1.5; background: #fafafa; }
+  .ev { margin-bottom: 0.4rem; }
+  .ev-transcript { color: #222; }
+  .ev-action { color: #1a73e8; font-weight: 600; }
+  .ev-system { color: #888; font-style: italic; }
+  .ev-raw { color: #999; font-size: 0.8rem; font-family: monospace; }
+  button { padding: 0.6rem 1.2rem; font-size: 1rem; border-radius: 4px; border: 1px solid #888; cursor: pointer; background: #f5f5f5; margin-right: 0.5rem; }
+  button.primary { background: #1a73e8; color: white; border-color: #1a73e8; }
+  button:disabled { opacity: 0.5; cursor: default; }
+  .note { background: #fff3cd; border: 1px solid #ffc107; border-radius: 4px; padding: 0.5rem 1rem; margin: 1rem 0; font-size: 0.85rem; }
+  #vu-wrap { margin: 0.8rem 0; display: flex; align-items: center; gap: 0.5rem; }
+  #vu-label { font-size: 0.75rem; color: #888; min-width: 3.5rem; }
+  #vu-bar { flex: 1; height: 10px; background: #eee; border-radius: 5px; overflow: hidden; }
+  #vu-fill { height: 100%; width: 0%; background: linear-gradient(90deg, #4caf50, #ffc107, #f44336); transition: width 0.08s; }
+</style>
+</head>
+<body>
+<h1>Phone Receptionist — Live Test</h1>
+
+<div class="note">
+  <strong>Instructions:</strong> Start the server in a terminal first:<br>
+  <code style="background:#eee;padding:2px 4px;border-radius:2px;">./scripts/run_receptionist_demo.sh</code><br>
+  Then open this page at <code>http://localhost:8000/receptionist.html</code>.<br>
+  Click <strong>Connect</strong>, speak for at least 3-4 seconds, and watch for transcript.
+</div>
+
+<div id="status">Not connected</div>
+
+<div id="vu-wrap">
+  <span id="vu-label">Mic: -∞ dB</span>
+  <div id="vu-bar"><div id="vu-fill"></div></div>
+</div>
+
+<div id="events"></div>
+<div style="margin-top: 1rem;">
+  <button id="btn-connect" class="primary">Connect & Start Mic</button>
+  <button id="btn-stop" disabled>Stop</button>
+  <button id="btn-clear">Clear</button>
+</div>
+
+<script>
+const statusEl = document.getElementById('status');
+const eventsEl = document.getElementById('events');
+const btnConnect = document.getElementById('btn-connect');
+const btnStop = document.getElementById('btn-stop');
+const btnClear = document.getElementById('btn-clear');
+const vuLabel = document.getElementById('vu-label');
+const vuFill = document.getElementById('vu-fill');
+
+const SAMPLE_RATE = 16000;
+let ws = null, audioCtx = null, stream = null, processor = null;
+
+function setStatus(s) { statusEl.textContent = s; console.log('[status]', s); }
+
+function addEvent(kind, text) {
+  var div = document.createElement('div');
+  div.className = 'ev ev-' + kind;
+  div.textContent = new Date().toLocaleTimeString() + ' [' + kind + '] ' + text;
+  eventsEl.appendChild(div);
+  eventsEl.scrollTop = eventsEl.scrollHeight;
+}
+
+function updateVU(buffer) {
+  var rms = 0;
+  for (var i = 0; i < buffer.length; i++) { rms += buffer[i] * buffer[i]; }
+  rms = Math.sqrt(rms / buffer.length);
+  var db = rms > 0.00001 ? 20 * Math.log10(rms) : -Infinity;
+  var pct = Math.max(0, Math.min(100, (db + 60) / 60 * 100));
+  vuFill.style.width = pct + '%';
+  vuLabel.textContent = 'Mic: ' + (db === -Infinity ? '-∞' : db.toFixed(1)) + ' dB';
+}
+
+btnConnect.onclick = async function() {
+  try {
+    setStatus('Requesting microphone...');
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: { sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true }
+    });
+    audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+
+    setStatus('Connecting to ws://localhost:8080...');
+    if (ws) { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); }
+    ws = new WebSocket('ws://localhost:8080');
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = function() {
+      setStatus('Connected. Speak now (3+ seconds for first transcript)...');
+      btnConnect.disabled = true;
+      btnStop.disabled = false;
+
+      var source = audioCtx.createMediaStreamSource(stream);
+      processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
+
+      processor.onaudioprocess = function(e) {
+        if (ws && ws.readyState === WebSocket.OPEN) {
+          var input = e.inputBuffer.getChannelData(0);
+          updateVU(input);
+          var i16 = new Int16Array(input.length);
+          for (var i = 0; i < input.length; i++) {
+            i16[i] = Math.max(-32768, Math.min(32767, input[i] * 32768));
+          }
+          ws.send(i16.buffer);
+        }
+      };
+    };
+
+    ws.onmessage = function(e) {
+      console.log('[ws]', typeof e.data === 'string' ? e.data.substring(0, 100) : 'binary(' + e.data.byteLength + ' bytes)');
+      try {
+        var msg = JSON.parse(e.data);
+        // Server sends {"event": "...", "text": "..."}
+        var ev = msg.event || '';
+        var txt = msg.text || '';
+        if (ev === 'transcript') {
+          addEvent('transcript', txt);
+        } else if (ev === 'agent_action') {
+          addEvent('action', txt);
+          if (txt.startsWith('respond: ')) {
+            var reply = txt.slice(9);
+            var utter = new SpeechSynthesisUtterance(reply);
+            utter.rate = 1.1;
+            window.speechSynthesis.speak(utter);
+          }
+        } else if (ev === 'state' || ev === 'error') {
+          addEvent('system', ev + ': ' + txt);
+        } else {
+          addEvent('raw', JSON.stringify(msg));
+        }
+      } catch (_) {
+        addEvent('raw', 'non-JSON: ' + (typeof e.data === 'string' ? e.data.substring(0, 80) : 'binary'));
+      }
+    };
+
+    ws.onerror = function(e) {
+      console.error('[ws] error event:', e);
+      setStatus('WebSocket error — check server terminal');
+    };
+
+    ws.onclose = function(e) {
+      console.log('[ws] closed:', e.code, e.reason, 'wasClean:', e.wasClean);
+      setStatus('Disconnected (code=' + e.code + ')');
+      btnConnect.disabled = false;
+      btnStop.disabled = true;
+      vuFill.style.width = '0%';
+      vuLabel.textContent = 'Mic: -∞ dB';
+    };
+  } catch (err) {
+    setStatus('Error: ' + err.message);
+    console.error(err);
+  }
+};
+
+btnStop.onclick = function() {
+  if (ws) ws.close(1000, 'user stop');
+  if (processor) processor.disconnect();
+  if (stream) stream.getTracks().forEach(function(t) { t.stop(); });
+  if (audioCtx) audioCtx.close();
+  ws = null; processor = null; stream = null; audioCtx = null;
+  setStatus('Stopped');
+  btnConnect.disabled = false;
+  btnStop.disabled = true;
+  vuFill.style.width = '0%';
+  vuLabel.textContent = 'Mic: -∞ dB';
+};
+
+btnClear.onclick = function() { eventsEl.innerHTML = ''; };
+</script>
+</body>
+</html>
