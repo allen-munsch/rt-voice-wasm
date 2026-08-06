@@ -32,7 +32,7 @@ Tomorrow it can be dirge with a `coding-assistant` prompt, backed by MCP tools
 and flowengine for computer use.
 
 - [x] **MCP tool bridge for dirge** — shipped. `scripts/dirge-coding-agent.sh` + `~/.config/dirge/prompts/voice-coding.md`. Dirge reads voice transcripts via `--prompt voice-coding --accept-all`, uses its built-in tools (read/edit/write/bash/grep/lsp), returns TTS-friendly voice responses via the ProcessAgent protocol. Test: `cargo test process_agent_with_dirge_coding_agent` (1 pass). Usage: `rt-voice-server --agent-hook './scripts/dirge-coding-agent.sh'`
-- [] **flowengine integration** — dirge uses flowengine for desktop automation (open editor, navigate, type, click) driven by voice commands
+- [] **flowengine integration** — voice commands compile to flowengine DAGs (shell nodes, HTTP requests, transforms) executed in sandboxed microVMs with retry/backoff and streaming output back to TTS. "Run the tests, then if they pass build the WASM package" → 2-node DAG with topological ordering. Deterministic data flow, not computer use
 - [] **Continuous voice loop** — after each response, keep the mic open so the user can iterate without touching the keyboard: "rename this function" → dirge edits → "now add a test" → dirge writes test → "run it" → dirge runs and reports
 - [] **Context awareness** — dirge has access to the current file, project structure, and git status so voice commands are relative ("add a parameter to this function") rather than absolute
 - [] **Multi-modal fallback** — when voice transcription confidence is low or the command is ambiguous, dirge asks for clarification (voice or typed)
