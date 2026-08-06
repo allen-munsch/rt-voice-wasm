@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Phone Receptionist Demo — starts server + web UI.
-# Requires: cargo, dirge (in PATH), whisper model at models/ggml-tiny.en-q5_1.bin
+# Requires: cargo, jolt, whisper model at models/ggml-tiny.en-q5_1.bin
+#   jolt:  curl -sL https://raw.githubusercontent.com/jolt-lang/jolt/main/install | bash
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -26,23 +27,23 @@ cd "$PROJECT_DIR"
 
 echo "=== Phone Receptionist Demo ==="
 echo ""
-echo "  1. rt-voice-server  → ws://localhost:8080 (Whisper + dirge agent)"
+echo "  1. rt-voice-server  → ws://localhost:8080 (Whisper + builtin agent)"
 echo "  2. Static files      → http://localhost:8000"
 echo ""
 echo "  Open http://localhost:8000/receptionist.html"
 echo "  Click 'Connect & Start Mic', speak for 3+ seconds."
 echo ""
 
-# Start server
+# Start server (uses builtin keyword-router agent)
+LD_LIBRARY_PATH="$PROJECT_DIR/build/parakeet:$PROJECT_DIR/build/moonshine:$LD_LIBRARY_PATH" \
 ./target/debug/rt-voice-server \
     --provider raw \
-    --agent-hook './scripts/dirge-agent.sh' \
     --port 8080 \
     &
 SERVER_PID=$!
 
-# Start static file server
-python3 web/serve.py &
+# Start static file server (jolt native ServerSocket)
+WEB_ROOT="$PROJECT_DIR/web" jolt -Sdeps '{:paths ["web" "."]}' "$PROJECT_DIR/web/serve.jolt" 8000 &
 HTTP_PID=$!
 
 echo "Server PID: $SERVER_PID  HTTP PID: $HTTP_PID"

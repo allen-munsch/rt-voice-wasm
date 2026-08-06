@@ -84,15 +84,19 @@ impl CallHandler {
             .await;
 
         while let Some(chunk) = self.transport.recv_audio().await {
+            eprintln!("[call] chunk {} samples, buf_len={}", chunk.pcm.len(), self.pipeline.buffer_len());
             if let Some(window) = self.pipeline.push_frame(&chunk.pcm) {
+                eprintln!("[call] window {} samples, transcribing...", window.len());
                 let sped = speedup(&window, self.pipeline.speed_factor());
 
                 match self.ctx.transcribe(&sped) {
                     Ok(texts) => {
                         let text: String = texts.join(" ");
+                        eprintln!("[call] transcribed {} segments: '{}'", texts.len(), &text[..text.len().min(80)]);
                         let merged = self.pipeline.merge_overlap(&text);
 
                         if !merged.is_empty() {
+                            eprintln!("[call] sending transcript: '{}'", &merged[..merged.len().min(50)]);
                             self.full_transcript.push_str(&merged);
                             self.full_transcript.push(' ');
 
@@ -101,6 +105,7 @@ impl CallHandler {
                                 .send_event(&Event::transcript(&merged))
                                 .await;
 
+                            eprintln!("[call] transcript sent ok");
                             self.handle_action(&merged).await;
                         }
                     }
@@ -108,6 +113,19 @@ impl CallHandler {
                         eprintln!("[call] transcription error: {e}");
                         let _ = self.transport.send_event(&Event::error(&e)).await;
                     }
+                }
+            }
+        }
+
+        // Flush any remaining audio buffered in the pipeline
+        if let Some(window) = self.pipeline.flush() {
+            let sped = speedup(&window, self.pipeline.speed_factor());
+            if let Ok(texts) = self.ctx.transcribe(&sped) {
+                let text: String = texts.join(" ");
+                let merged = self.pipeline.merge_overlap(&text);
+                if !merged.is_empty() {
+                    self.full_transcript.push_str(&merged);
+                    let _ = self.transport.send_event(&Event::transcript(&merged)).await;
                 }
             }
         }
@@ -129,7 +147,22 @@ impl CallHandler {
                 self.state = CallState::Routing;
             }
             CallState::Routing => {
-                let action = self.agent.route(text);
+                // ProcessAgent is non-blocking (route() returns Continue immediately,
+                // the LLM response arrives asynchronously on a background thread).
+                // Poll for up to 10 seconds for a non-Continue response.
+                let action = {
+                    let mut action = self.agent.route(text);
+                    if matches!(action, Action::Continue) {
+                        for _ in 0..50 {
+                            tokio::time::sleep(std::time::Duration::from_millis(200)).await;
+                            action = self.agent.poll();
+                            if !matches!(action, Action::Continue) {
+                                break;
+                            }
+                        }
+                    }
+                    action
+                };
                 match &action {
                     Action::Continue => {}
                     Action::Respond(reply) => {

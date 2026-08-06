@@ -44,9 +44,9 @@ impl StreamingPipeline {
         self.buffer.extend_from_slice(samples);
         if self.buffer.len() >= self.window_samples {
             let window: Vec<i16> = self.buffer[self.buffer.len() - self.window_samples..].to_vec();
-            // Slide: keep overlap portion for next window
-            let keep = self.buffer.len() - self.step_samples;
-            self.buffer = self.buffer.split_off(keep);
+            // Slide: discard oldest step_samples, keep the overlap
+            // split_off(n) returns [n..len); we want [step_samples..len]
+            self.buffer = self.buffer.split_off(self.step_samples as usize);
             let rms = self.compute_rms(&window);
             if rms < self.rms_threshold {
                 return None;
@@ -99,6 +99,29 @@ impl StreamingPipeline {
     pub fn speed_factor(&self) -> f64 {
         self.speed_factor
     }
+
+    pub fn buffer_len(&self) -> usize {
+        self.buffer.len()
+    }
+
+    /// Flush any remaining buffered audio as a partial window.
+    /// Called when the transport disconnects to avoid dropping trailing speech.
+    pub fn flush(&mut self) -> Option<Vec<i16>> {
+        if self.buffer.is_empty() {
+            return None;
+        }
+        // Pad to full window with silence so whisper gets enough context
+        let mut window = self.buffer.clone();
+        if window.len() < self.window_samples {
+            window.resize(self.window_samples, 0i16);
+        }
+        self.buffer.clear();
+        let rms = self.compute_rms(&window[..self.window_samples]);
+        if rms < self.rms_threshold {
+            return None;
+        }
+        Some(window)
+    }
 }
 
 #[cfg(test)]
@@ -120,6 +143,24 @@ mod tests {
         let result = pipeline.push_frame(&loud);
         assert!(result.is_some());
         assert_eq!(result.unwrap().len(), 48000); // window_samples = 16000 * 3
+    }
+
+    #[test]
+    fn sliding_window_advances_and_keeps_overlap() {
+        // window 3s / step 1s at 16k. After a window fires, the buffer must
+        // hold the tail from step_samples onward (2s overlap), not the stale
+        // head - otherwise windows stop advancing past the first 2s.
+        let mut pipeline = StreamingPipeline::new(16000);
+        let mut audio = vec![0i16; 64000]; // 4s
+        for (i, s) in audio.iter_mut().enumerate() {
+            *s = (i % 30000) as i16;
+        }
+        pipeline.push_frame(&audio[..32000]); // 2s, no window yet
+        let w1 = pipeline.push_frame(&audio[32000..48000]).unwrap();
+        assert_eq!(w1, audio[..48000]);
+        assert_eq!(pipeline.buffer_len(), 32000); // kept 2s of overlap
+        let w2 = pipeline.push_frame(&audio[48000..]).unwrap();
+        assert_eq!(w2, audio[16000..]); // contiguous advance: [1s..4s]
     }
 
     #[test]

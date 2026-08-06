@@ -141,4 +141,19 @@ fn main() {
     println!("cargo:rerun-if-changed=third_party/whisper.cpp/");
     println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/13");
     println!("cargo:rustc-link-lib=static=stdc++");
+
+    // Parakeet engine (shared library, only parakeet_capi_* symbols exported)
+    let parakeet_lib_dir = PathBuf::from("build/parakeet");
+    println!("cargo:rustc-link-search=native={}", parakeet_lib_dir.display());
+    println!("cargo:rustc-link-lib=dylib=parakeet");
+    println!("cargo:rustc-link-lib=dylib=ggml");
+    println!("cargo:rustc-link-lib=dylib=ggml-base");
+    println!("cargo:rustc-link-lib=dylib=ggml-cpu");
+    // Set rpath so the binary finds the .so files at runtime
+    println!("cargo:rustc-link-arg=-Wl,-rpath,$ORIGIN/../build/parakeet");
+    println!("cargo:rustc-link-arg=-Wl,-rpath,{}", parakeet_lib_dir.canonicalize().unwrap_or(parakeet_lib_dir).display());
+
+    // Moonshine engine — loaded at runtime via dlopen (avoids link-time
+    // conflicts with whisper.cpp's statically-linked ggml and ONNX Runtime).
+    // The shared library is at build/moonshine/libmoonshine.so.
 }

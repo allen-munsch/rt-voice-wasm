@@ -86,7 +86,7 @@ btnConnect.onclick = async function() {
     stream = await navigator.mediaDevices.getUserMedia({
       audio: { sampleRate: SAMPLE_RATE, channelCount: 1, echoCancellation: true }
     });
-    audioCtx = new AudioContext({ sampleRate: SAMPLE_RATE });
+    audioCtx = new AudioContext(); // Don't force sampleRate — use native, downsample below
 
     setStatus('Connecting to ws://localhost:8080...');
     if (ws) { ws.onclose = null; ws.onerror = null; ws.onmessage = null; ws.close(); }
@@ -94,7 +94,9 @@ btnConnect.onclick = async function() {
     ws.binaryType = 'arraybuffer';
 
     ws.onopen = function() {
-      setStatus('Connected. Speak now (3+ seconds for first transcript)...');
+      var inputRate = audioCtx.sampleRate;
+      var ratio = inputRate / SAMPLE_RATE; // e.g. 44100/16000 = 2.756
+      setStatus('Connected (' + inputRate + 'Hz→16kHz). Speak now (3+ seconds for first transcript)...');
       btnConnect.disabled = true;
       btnStop.disabled = false;
 
@@ -107,11 +109,20 @@ btnConnect.onclick = async function() {
         if (ws && ws.readyState === WebSocket.OPEN) {
           var input = e.inputBuffer.getChannelData(0);
           updateVU(input);
-          var i16 = new Int16Array(input.length);
-          for (var i = 0; i < input.length; i++) {
-            i16[i] = Math.max(-32768, Math.min(32767, input[i] * 32768));
+
+          // Downsample to 16kHz via averaging anti-alias filter
+          var outLen = Math.floor(input.length / ratio);
+          var out = new Int16Array(outLen);
+          for (var i = 0; i < outLen; i++) {
+            var start = Math.floor(i * ratio);
+            var end = Math.floor((i + 1) * ratio);
+            if (end <= start) end = start + 1;
+            var sum = 0;
+            for (var j = start; j < end; j++) sum += input[j];
+            var avg = sum / (end - start);
+            out[i] = Math.max(-32768, Math.min(32767, avg * 32768));
           }
-          ws.send(i16.buffer);
+          ws.send(out.buffer);
         }
       };
     };

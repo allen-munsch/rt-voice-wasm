@@ -1,0 +1,168 @@
+#!/usr/bin/env jolt
+;; Closed-loop voice scenario harness: JSON DSL → TTS → WebSocket → STT → assert.
+;;
+;; Reads scenarios.json, synthesizes each "speak" phrase via edge-tts,
+;; streams audio through rt-voice-server via ws-send, and validates
+;; expect conditions against server events.
+;;
+;; Usage:
+;;   Terminal 1: cargo run --bin rt-voice-server -- --provider raw
+;;   Terminal 2: jolt scripts/tts_harness.jolt
+;;
+;; Dependencies: jolt, jq, python3 (edge-tts), ws-send (built from this repo),
+;;               ffmpeg
+
+(require (quote clojure.java.shell))
+(require (quote clojure.string))
+(require (quote clojure.java.io))
+
+;; -- config ---------------------------------------------------------------
+(def server-url (or (System/getenv "WS_SERVER") "ws://localhost:8080"))
+(def scenarios-file (or (System/getenv "SCENARIOS") "tests/scenarios.json"))
+(def cache-dir (or (System/getenv "TTS_CACHE") "tests/tts_cache"))
+(def ws-send-bin (or (System/getenv "WS_SEND_BIN") "./target/debug/ws-send"))
+(def timeout-s "30")
+
+;; -- helpers --------------------------------------------------------------
+(defn shell [& args]
+  (apply clojure.java.shell/sh args))
+
+(defn jq [expr input]
+  (let [result (shell "jq" "-r" expr :in input)]
+    (if (zero? (:exit result))
+      (clojure.string/trim (:out result))
+      nil)))
+
+(defn phrase-file [phrase]
+  (str cache-dir "/" (Math/abs (hash phrase)) ".wav"))
+
+(defn ensure-cache-dir []
+  (.mkdirs (clojure.java.io/file cache-dir)))
+
+;; -- TTS ------------------------------------------------------------------
+(defn synthesize [phrase]
+  (when-not (clojure.string/blank? phrase)
+    (let [wav-path (phrase-file phrase)]
+    (when-not (.exists (clojure.java.io/file wav-path))
+      (println (str "  synthesizing: " (pr-str phrase)))
+      (let [mp3-path (str wav-path ".mp3")
+             tts (shell "python3" "-c"
+                        (str "import asyncio, edge_tts, sys\n"
+                             "async def main():\n"
+                             " c=edge_tts.Communicate(sys.argv[1],'en-US-AriaNeural')\n"
+                             " d=bytearray()\n"
+                             " async for chunk in c.stream():\n"
+                             "  if chunk['type']=='audio': d.extend(chunk['data'])\n"
+                             " open(sys.argv[2],'wb').write(d)\n"
+                             "asyncio.run(main())")
+                       phrase mp3-path)]
+        (when-not (zero? (:exit tts))
+          (println (str "  TTS error: " (:err tts)))
+          (System/exit 1))
+        (let [ffmpeg (shell "ffmpeg" "-y" "-i" mp3-path
+                            "-ar" "16000" "-ac" "1" "-sample_fmt" "s16"
+                            "-f" "wav" wav-path
+                            :env {"PATH" (System/getenv "PATH")})]
+          (.delete (clojure.java.io/file mp3-path))
+          (when-not (zero? (:exit ffmpeg))
+            (println (str "  ffmpeg error: " (:err ffmpeg)))
+            (System/exit 1)))))
+    wav-path)))
+
+;; -- event streaming ------------------------------------------------------
+(defn send-audio-and-collect [wav-path]
+  (let [result (shell ws-send-bin server-url wav-path
+                      "--timeout-s" timeout-s)]
+    (when-not (zero? (:exit result))
+      (when (seq (:err result))
+        (println (str "  ws-send error: " (:err result)))))
+    (:out result)))
+
+;; -- event matching -------------------------------------------------------
+(defn event-matches? [event-json condition]
+  (let [kind-want (jq ".event" event-json)
+        text (jq ".text" event-json)]
+    (when (and kind-want text)
+      (and (= kind-want (:event condition))
+           (or (not (:contains condition))
+               (.contains (.toLowerCase text)
+                          (.toLowerCase (:contains condition))))))))
+
+(defn find-matching-event [events condition]
+  (let [lines (clojure.string/split-lines events)]
+    (some (fn [line]
+            (when (event-matches? line condition)
+              line))
+          lines)))
+
+;; -- scenario runner ------------------------------------------------------
+(defn run-scenario [scenario]
+  (let [name (jq ".name" scenario)
+        turns-json (jq ".turns" scenario)]
+    (print (str "  [" name "] ... "))
+    (flush)
+
+    ;; pre-synthesize all speak phrases
+    (let [turns-count (Integer/parseInt (jq "length" turns-json))]
+      (dotimes [i turns-count]
+        (let [turn (jq (str ".[" i "]") turns-json)
+              speak (jq ".speak // empty" turn)]
+          (when speak
+            (synthesize speak)))))
+
+    ;; run turns
+    (loop [i 0]
+      (when (< i (Integer/parseInt (jq "length" turns-json)))
+        (let [turn (jq (str ".[" i "]") turns-json)
+              speak (jq ".speak // empty" turn)
+              expect-json (jq ".expect // empty" turn)]
+          (cond
+            speak
+            (let [wav-path (phrase-file speak)
+                  events (send-audio-and-collect wav-path)
+                  expect-json-next (jq (str ".[" (+ i 1) "].expect // empty") turns-json)]
+              (if expect-json-next
+                (let [condition {:event (jq ".event" expect-json-next)
+                                 :contains (jq ".contains // empty" expect-json-next)}
+                      match (find-matching-event events condition)]
+                  (if match
+                    (do (println (str "PASS (" (jq ".text" match) ")"))
+                        (recur (+ i 2)))
+                    (do (println (str "FAIL: no event matching " (pr-str condition)
+                                      " in:\n" events))
+                        (System/exit 1))))
+                (recur (inc i))))
+
+            expect-json
+            (do (println "PASS (skipped: no audio to send before expect)")
+                (recur (inc i)))
+
+            :else
+            (do (println (str "FAIL: unknown turn: " turn))
+                (System/exit 1))))))))
+
+;; -- main -----------------------------------------------------------------
+(defn load-scenarios [path]
+  (let [content (slurp path)
+        count-str (jq ".scenarios | length" content)
+        count (Integer/parseInt count-str)]
+    (for [i (range count)]
+      (jq (str ".scenarios[" i "]") content))))
+
+(defn -main [& args]
+  (ensure-cache-dir)
+  (let [scenarios (load-scenarios scenarios-file)]
+    (println "=" (apply str (repeat 56 "=")))
+    (println "Voice Scenario Harness (Jolt)")
+    (println (str "  server: " server-url))
+    (println (str "  scenarios: " (count scenarios)))
+    (println "=" (apply str (repeat 56 "=")))
+    (println "")
+    (doseq [s scenarios]
+      (run-scenario s)
+      (Thread/sleep 500))
+    (println "")
+    (println "All scenarios passed.")))
+
+(when *file*
+  (apply -main *command-line-args*))

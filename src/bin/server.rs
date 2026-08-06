@@ -17,6 +17,8 @@
 use rt_voice_wasm::agent::{default_rules, IntentRouter, ProcessAgent};
 use rt_voice_wasm::call::{CallConfig, CallHandler};
 use rt_voice_wasm::engine::SttEngine;
+use rt_voice_wasm::moonshine::MoonshineEngine;
+use rt_voice_wasm::parakeet::ParakeetEngine;
 use rt_voice_wasm::transport::{AudioTransport, RawWsTransport, TwilioTransport};
 use rt_voice_wasm::whisper::WhisperContext;
 
@@ -26,6 +28,13 @@ use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async;
 
 #[derive(Clone, Copy)]
+enum Engine {
+    Whisper,
+    Parakeet,
+    Moonshine,
+}
+
+#[derive(Clone, Copy)]
 enum Provider {
     Twilio,
     Vapi,
@@ -33,6 +42,7 @@ enum Provider {
 }
 
 struct Config {
+    engine: Engine,
     model: String,
     port: u16,
     speed: f64,
@@ -44,11 +54,12 @@ struct Config {
 fn parse_args() -> Config {
     let args: Vec<String> = std::env::args().collect();
     let mut cfg = Config {
-        model: "models/ggml-base.en-q5_1.bin".into(),
+        engine: Engine::Moonshine,
+        model: "models/moonshine-tiny".into(),
         port: 8080,
         speed: 1.0,
         provider: Provider::Twilio,
-        agent_hook: None,
+        agent_hook: Some("./scripts/dirge-agent.sh".into()),
         greeting: CallConfig::default().greeting,
     };
 
@@ -87,6 +98,20 @@ fn parse_args() -> Config {
                     };
                 }
             }
+            "--engine" => {
+                i += 1;
+                if i < args.len() {
+                    cfg.engine = match args[i].as_str() {
+                        "whisper" => Engine::Whisper,
+                        "parakeet" => Engine::Parakeet,
+                        "moonshine" => Engine::Moonshine,
+                        other => {
+                            eprintln!("unknown engine '{other}', using moonshine");
+                            Engine::Moonshine
+                        }
+                    };
+                }
+            }
             "--agent-hook" => {
                 i += 1;
                 if i < args.len() {
@@ -115,13 +140,14 @@ fn parse_args() -> Config {
 
 fn print_help() {
     eprintln!(
-        r#"rt-voice-server — Whisper-powered real-time call transcription + agent routing
+        r#"rt-voice-server — real-time call transcription + agent routing (Whisper / Parakeet)
 
 USAGE:
   rt-voice-server [FLAGS]
 
 FLAGS:
-  --model PATH     Whisper model path (default: models/ggml-tiny.en-q5_1.bin)
+  --engine NAME    STT engine: whisper or parakeet (default: whisper)
+  --model PATH     Model path (default: models/ggml-tiny.en-q5_1.bin for whisper)
   --port N         WebSocket listen port (default: 8080)
   --speed FACTOR   Audio speedup factor (default: 1.0, e.g. 1.5 = 50% faster)
   --provider NAME  Audio transport: twilio, vapi, or raw (default: twilio)
@@ -134,6 +160,10 @@ PROVIDERS:
   vapi    VAPI-compatible — same wire format as Twilio
   raw     Raw 16-bit PCM over WebSocket — for custom integrations
 
+ENGINES:
+  whisper  whisper.cpp (GGML) — 3s window, VAD gating, overlap merge
+  parakeet parakeet.cpp (GGML) — cache-aware streaming, built-in <EOU>, RTFx ~27x vs whisper on CPU
+
 AGENTS:
   builtin (default)  Keyword rule matching via IntentRouter
   --agent-hook CMD   External process: receives transcript lines on stdin,
@@ -144,26 +174,11 @@ AGENTS:
 
 EXAMPLES:
   rt-voice-server
+  rt-voice-server --engine parakeet --model models/parakeet_realtime_eou_120m-v1.gguf
   rt-voice-server --speed 1.5 --provider raw --agent-hook 'python3 router.py'
   rt-voice-server --provider vapi --port 9090
 "#
     );
-}
-
-fn build_agent(cfg: &Config) -> Box<dyn rt_voice_wasm::agent::Agent> {
-    if let Some(ref hook) = cfg.agent_hook {
-        match ProcessAgent::spawn(hook) {
-            Ok(pa) => {
-                eprintln!("[agent] using external process: {hook}");
-                return Box::new(pa);
-            }
-            Err(e) => {
-                eprintln!("[agent] failed to spawn '{hook}': {e}, falling back to builtin");
-            }
-        }
-    }
-    eprintln!("[agent] using builtin keyword router");
-    Box::new(IntentRouter::new(default_rules()))
 }
 
 #[tokio::main]
@@ -171,9 +186,17 @@ async fn main() {
     let cfg = parse_args();
 
     eprintln!("[model] loading from {}...", cfg.model);
-    let ctx: Arc<dyn SttEngine> = Arc::new(
-        WhisperContext::init_from_file(&cfg.model).expect("failed to load whisper model"),
-    );
+    let ctx: Arc<dyn SttEngine> = match cfg.engine {
+        Engine::Whisper => Arc::new(
+            WhisperContext::init_from_file(&cfg.model).expect("failed to load whisper model"),
+        ),
+        Engine::Parakeet => Arc::new(
+            ParakeetEngine::init_from_file(&cfg.model).expect("failed to load parakeet model"),
+        ),
+        Engine::Moonshine => Arc::new(
+            MoonshineEngine::init_from_dir(&cfg.model).expect("failed to load moonshine model"),
+        ),
+    };
 
     let call_cfg = CallConfig::default()
         .with_speed(cfg.speed)
@@ -188,7 +211,8 @@ async fn main() {
         Provider::Raw => "raw",
     };
     eprintln!(
-        "[server] listening on ws://{addr} (provider={provider_name}, speed={}x)",
+        "[server] listening on ws://{addr} (provider={provider_name}, engine={}, speed={}x)",
+        match cfg.engine { Engine::Whisper => "whisper", Engine::Parakeet => "parakeet", Engine::Moonshine => "moonshine" },
         cfg.speed
     );
     eprintln!("[server] Twilio URL: ws://your-host:{}", cfg.port);

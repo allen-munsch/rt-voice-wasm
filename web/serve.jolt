@@ -1,0 +1,122 @@
+#!/usr/bin/env jolt
+;; Static file server for the rt-voice-wasm web harness.
+;; Uses java.net.ServerSocket (via jolt.socket) — no socat needed.
+;; Serves with COOP/COEP headers required for SharedArrayBuffer.
+;;
+;;   jolt web/serve.jolt           # default port 8000
+;;   jolt web/serve.jolt 9000      # custom port
+
+(require (quote clojure.string))
+(require (quote clojure.java.io))
+(require (quote jolt.socket))
+
+;; -- config ---------------------------------------------------------------
+(def web-root
+  (or (System/getenv "WEB_ROOT")
+      (let [script (System/getProperty "jolt.file")]
+        (if script
+          (let [script-dir (.getParent (clojure.java.io/file script))]
+            (.getAbsolutePath (clojure.java.io/file script-dir)))
+          (do (println "Warning: WEB_ROOT not set, using ./web")
+              (.getAbsolutePath (clojure.java.io/file "web")))))))
+
+(defn parse-port [args]
+  (if (pos? (count args))
+    (let [p (parse-long (first args))]
+      (if (and p (pos? p) (< p 65536)) p 8000))
+    8000))
+
+;; -- mime -----------------------------------------------------------------
+(defn guess-mime [path]
+  (cond
+    (or (.endsWith path ".wasm") (.endsWith path ".wasm.js")) "application/wasm"
+    (.endsWith path ".html")   "text/html; charset=utf-8"
+    (.endsWith path ".js")     "application/javascript; charset=utf-8"
+    (.endsWith path ".css")    "text/css; charset=utf-8"
+    (.endsWith path ".json")   "application/json"
+    (.endsWith path ".svg")    "image/svg+xml"
+    (.endsWith path ".png")    "image/png"
+    (.endsWith path ".ico")    "image/x-icon"
+    :else                      "application/octet-stream"))
+
+;; -- response to an OutputStream ------------------------------------------
+(defn write-bytes [out b]
+  (.write out b 0 (alength b)))
+
+(defn write-ln [out s]
+  (let [bytes (.getBytes (str s "\r\n") "UTF-8")]
+    (.write out bytes 0 (alength bytes))))
+
+(defn write-response [out status content-type body]
+  (write-ln out (str "HTTP/1.0 " status))
+  (write-ln out (str "Content-Type: " content-type))
+  (write-ln out "Cross-Origin-Opener-Policy: same-origin")
+  (write-ln out "Cross-Origin-Embedder-Policy: require-corp")
+  (write-ln out "Cache-Control: no-cache")
+  (let [body-bytes (if (string? body) (.getBytes body "UTF-8") body)]
+    (write-ln out (str "Content-Length: " (alength body-bytes)))
+    (write-ln out "")
+    (write-bytes out body-bytes)))
+
+;; -- routing --------------------------------------------------------------
+(defn serve-path [out req-path]
+  (let [;; Normalize: strip query string, default to index.html
+        path (let [q (.indexOf req-path 63)]
+               (if (pos? q) (.substring req-path 0 q) req-path))
+        path (if (= "/" path) "/index.html" path)
+        file-path (.getCanonicalPath (clojure.java.io/file web-root path))]
+    (if (.startsWith file-path web-root)
+      (let [f (clojure.java.io/file file-path)]
+        (if (and (.exists f) (.isFile f))
+          (let [content (slurp f)
+                mime (guess-mime file-path)]
+            (write-response out "200 OK" mime content))
+          (write-response out "404 Not Found" "text/plain" "404 Not Found")))
+      (write-response out "403 Forbidden" "text/plain" "403 Forbidden"))))
+
+;; -- parse one HTTP request from an InputStream ---------------------------
+(defn read-request [in]
+  (let [buf (byte-array 8192)]
+    (loop [total 0]
+      (let [n (.read in buf total (- (alength buf) total))]
+        (when (pos? n)
+          (let [total (+ total n)
+                s (String. buf 0 total "UTF-8")]
+            (if (.contains s "\r\n\r\n")
+              s
+              (when (< total (alength buf))
+                (recur total)))))))))
+
+;; -- handle one connection ------------------------------------------------
+(defn handle-conn [sock]
+  (try
+    (let [in (.getInputStream sock)
+          out (.getOutputStream sock)
+          req (read-request in)]
+      (if req
+        (let [lines (clojure.string/split req #"\r\n")
+              request-line (first lines)
+              parts (clojure.string/split request-line #" ")
+              method (first parts)
+              req-path (second parts)]
+          (if (and method req-path)
+            (serve-path out req-path)
+            (write-response out "400 Bad Request" "text/plain" "Bad Request")))
+        (write-response out "400 Bad Request" "text/plain" "Bad Request")))
+    (catch :default e
+      (println "Error handling connection:" (.getMessage e)))
+    (finally
+      (try (.close sock) (catch :default _ nil)))))
+
+;; -- main loop ------------------------------------------------------------
+(defn serve-loop [port]
+  (let [ss (java.net.ServerSocket. port)]
+    (println (str "Serving " web-root " on http://localhost:" port))
+    (println "(^C to stop)")
+    (loop []
+      (let [sock (.accept ss)]
+        (handle-conn sock)
+        (recur)))))
+
+(let [port (parse-port *command-line-args*)]
+  (serve-loop port))

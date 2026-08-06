@@ -96,9 +96,8 @@ pub trait AudioTransport: Send + 'static {
 
 enum TwilioMsg {
     Audio(Vec<i16>),
-    Start { stream_sid: String },
+    Start,
     Stop,
-    Close,
     Other,
 }
 
@@ -143,8 +142,8 @@ impl TwilioTransport {
             }
             Some("start") => {
                 let sid = v["streamSid"].as_str().unwrap_or("unknown").to_string();
-                self.stream_sid = Some(sid.clone());
-                TwilioMsg::Start { stream_sid: sid }
+                self.stream_sid = Some(sid);
+                TwilioMsg::Start
             }
             Some("stop") => TwilioMsg::Stop,
             _ => TwilioMsg::Other,
@@ -167,8 +166,8 @@ impl AudioTransport for TwilioTransport {
                                 original_rate: 8000,
                             });
                         }
-                        TwilioMsg::Start { .. } => continue,
-                        TwilioMsg::Stop | TwilioMsg::Close => return None,
+                        TwilioMsg::Start => continue,
+                        TwilioMsg::Stop => return None,
                         TwilioMsg::Other => continue,
                     },
                     Ok(Message::Close(_)) => return None,
@@ -213,18 +212,31 @@ pub struct RawWsTransport {
     ws_rx: futures_util::stream::SplitStream<
         tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     >,
-    ws_tx: futures_util::stream::SplitSink<
-        tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
-        Message,
-    >,
+    event_tx: std::sync::mpsc::Sender<String>,
 }
 
 impl RawWsTransport {
     pub fn new(
         stream: tokio_tungstenite::WebSocketStream<tokio::net::TcpStream>,
     ) -> Self {
-        let (ws_tx, ws_rx) = stream.split();
-        RawWsTransport { ws_rx, ws_tx }
+        let (mut ws_tx, ws_rx) = stream.split();
+        let (event_tx, event_rx) = std::sync::mpsc::channel::<String>();
+        let rt_handle = tokio::runtime::Handle::current();
+        std::thread::spawn(move || {
+            rt_handle.block_on(async move {
+                eprintln!("[ws-writer] started");
+                while let Ok(payload) = event_rx.recv() {
+                    eprintln!("[ws-writer] got {} bytes", payload.len());
+                    if ws_tx.send(Message::Text(payload)).await.is_err() {
+                        eprintln!("[ws-writer] send error, exiting");
+                        break;
+                    }
+                    eprintln!("[ws-writer] sent ok");
+                }
+                eprintln!("[ws-writer] exiting");
+            });
+        });
+        RawWsTransport { ws_rx, event_tx }
     }
 }
 
@@ -270,12 +282,11 @@ impl AudioTransport for RawWsTransport {
             "text": event.text,
         })
         .to_string();
-        Box::pin(async move {
-            self.ws_tx
-                .send(Message::Text(payload))
-                .await
-                .map_err(|e| e.to_string())
-        })
+        let result = self
+            .event_tx
+            .send(payload)
+            .map_err(|e| format!("channel send error: {e}"));
+        Box::pin(std::future::ready(result))
     }
 
     fn name(&self) -> &str {

@@ -1,0 +1,48 @@
+{
+  "scenarios": [
+    {
+      "name": "route-to-agent",
+      "description": "Customer asks for a human agent",
+      "turns": [
+        {"speak": "I want to speak to a human agent please"},
+        {"expect": {"event": "agent_action", "contains": "transfer"}}
+      ]
+    },
+    {
+      "name": "route-to-support",
+      "description": "Customer describes account trouble",
+      "turns": [
+        {"speak": "I have a problem with my account"},
+        {"expect": {"event": "agent_action", "contains": "transfer"}}
+      ]
+    },
+    {
+      "name": "escalate-to-manager",
+      "description": "Customer demands manager",
+      "turns": [
+        {"speak": "I want to speak to your manager right now"},
+        {"expect": {"event": "agent_action", "contains": "escalate"}}
+      ]
+    },
+    {
+      "name": "multi-turn-escalation",
+      "description": "Greeting, then problem, then anger — escalates",
+      "turns": [
+        {"speak": "Hello, who is this?"},
+        {"expect": {"event": "agent_action", "contains": "respond"}},
+        {"speak": "I have a serious problem with my bill"},
+        {"expect": {"event": "agent_action", "contains": "transfer"}},
+        {"speak": "No, I want to speak to your manager right now!"},
+        {"expect": {"event": "agent_action", "contains": "escalate"}}
+      ]
+    },
+    {
+      "name": "goodbye",
+      "description": "Customer says thanks and hangs up",
+      "turns": [
+        {"speak": "thanks for your help goodbye"},
+        {"expect": {"event": "agent_action", "contains": "respond"}}
+      ]
+    }
+  ]
+}

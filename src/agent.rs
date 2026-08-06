@@ -20,6 +20,11 @@ pub enum Action {
 /// The Agent trait: any type that can route a transcript to an Action.
 pub trait Agent: Send + Sync {
     fn route(&self, text: &str) -> Action;
+
+    /// Non-blocking poll for an already-pending action. Default returns Continue.
+    fn poll(&self) -> Action {
+        Action::Continue
+    }
 }
 
 /// A single routing rule: trigger phrases → action.
@@ -161,6 +166,15 @@ impl Agent for ProcessAgent {
             Action::Continue
         }
     }
+
+    fn poll(&self) -> Action {
+        if let Ok(rx) = self.rx.lock() {
+            if let Ok(action) = rx.try_recv() {
+                return action;
+            }
+        }
+        Action::Continue
+    }
 }
 
 impl ProcessAgent {
@@ -199,6 +213,17 @@ impl ProcessAgent {
         }
         Action::Continue
     }
+
+    /// Poll for an already-pending action without writing to stdin.
+    /// Returns Continue if nothing is ready yet.
+    pub fn poll(&self) -> Action {
+        if let Ok(rx) = self.rx.lock() {
+            if let Ok(action) = rx.try_recv() {
+                return action;
+            }
+        }
+        Action::Continue
+    }
 }
 
 impl Drop for ProcessAgent {
@@ -214,6 +239,22 @@ fn shell_words(cmd: &str) -> Vec<&str> {
 /// Pre-built phone bank routing configuration.
 pub fn default_rules() -> Vec<Rule> {
     vec![
+        Rule {
+            triggers: vec![
+                "what can you do".into(),
+                "what do you do".into(),
+                "capabilities".into(),
+                "who are you".into(),
+                "what are you".into(),
+                "how can you help".into(),
+                "what can i ask".into(),
+            ],
+            action: Action::Respond(
+                "I'm the automated receptionist. I can answer questions, \
+                 route you to the right department, transfer you to a live \
+                 agent, or escalate issues to a supervisor. How can I help?".into(),
+            ),
+        },
         Rule {
             triggers: vec![
                 "agent".into(), "representative".into(), "human".into(),
@@ -325,6 +366,26 @@ mod tests {
             }
         }
         panic!("dirge agent did not respond within 30s");
+    }
+
+    #[test]
+    fn process_agent_with_dirge_coding_agent() {
+        let agent =
+            ProcessAgent::spawn("./scripts/dirge-coding-agent.sh").expect("spawn coding agent");
+
+        let result = agent.route("how many test files are in the tests directory");
+        assert!(matches!(result, Action::Continue));
+
+        for _ in 0..60 {
+            std::thread::sleep(std::time::Duration::from_millis(500));
+            let action = agent.route("");
+            if !matches!(action, Action::Continue) {
+                // Should get a Respond action with test file info
+                assert!(matches!(action, Action::Respond(_)));
+                return;
+            }
+        }
+        panic!("dirge coding agent did not respond within 30s");
     }
 
     #[test]
