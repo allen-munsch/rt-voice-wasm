@@ -1,0 +1,110 @@
+{
+  "scenarios": [
+    {
+      "name": "first-transcript-budget",
+      "description": "First transcript must arrive within 5 seconds of audio start",
+      "tier": 2,
+      "tags": ["ux", "latency", "first-transcript"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 0,
+      "turns": [
+        {"speak": "Hello, this is a test of the emergency broadcast system.", "expect": {"event": "transcript", "contains": "test", "within_ms": 5000, "not_contains": "error"}}
+      ]
+    },
+    {
+      "name": "response-latency-budget",
+      "description": "Agent action must arrive within 8 seconds of the transcript",
+      "tier": 2,
+      "tags": ["ux", "latency", "agent-response"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 0,
+      "turns": [
+        {"speak": "I need to speak to a human agent please", "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 8000, "not_contains": "error"}}
+      ]
+    },
+    {
+      "name": "no-error-events",
+      "description": "Normal conversation produces zero error events",
+      "tier": 2,
+      "tags": ["ux", "robustness", "no-errors"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {"speak": "Hello, can you help me with my account?", "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "Thank you, that's all I needed.", "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ]
+    },
+    {
+      "name": "event-ordering",
+      "description": "Events must arrive in order: greeting → transcript → agent_action → full_transcript",
+      "tier": 2,
+      "tags": ["ux", "ordering", "correctness"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {"speak": "I want to speak to an agent", "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 10000, "not_contains": "error"}}
+      ]
+    },
+    {
+      "name": "rapid-turn-staleness",
+      "description": "Rapid back-to-back turns must not produce stale overlapping transcripts",
+      "tier": 2,
+      "tags": ["ux", "concurrency", "staleness"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 200,
+      "turns": [
+        {"speak": "what can you do", "expect": {"event": "agent_action", "contains": "receptionist", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "transfer me to support", "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 10000, "not_contains": "error"}}
+      ]
+    },
+    {
+      "name": "silence-gap-resilience",
+      "description": "Natural pauses in speech must not cause spurious silence-gated drops",
+      "tier": 2,
+      "tags": ["ux", "silence", "robustness"],
+      "voice": "en-US-AriaNeural",
+      "rate": "-10%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "Hello... I have... a problem... with my account.", "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 15000, "not_contains": "error"}}
+      ]
+    },
+    {
+      "name": "long-utterance",
+      "description": "A 10+ second continuous utterance must produce a complete transcript",
+      "tier": 2,
+      "tags": ["ux", "long-form", "robustness"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {"speak": "I have been having trouble with my account for the past three weeks, every time I try to log in it says my password is incorrect even though I reset it twice and called support already but nobody helped me", "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 20000, "not_contains": "error"}}
+      ]
+    },
+    {
+      "name": "barge-in-interrupt",
+      "description": "User interrupts the system's greeting with an immediate request — system handles it",
+      "tier": 2,
+      "tags": ["ux", "barge-in", "robustness"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+20%",
+      "pitch": "+0Hz",
+      "pause_ms": 100,
+      "turns": [
+        {"speak": "agent please", "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 5000, "not_contains": "error"}}
+      ]
+    }
+  ]
+}

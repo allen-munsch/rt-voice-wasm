@@ -29,12 +29,17 @@ fn main() {
         ("GGML_USE_CPU_REPACK", None),
     ];
 
+    let native_cpu = env::var("CARGO_FEATURE_NATIVE_CPU").is_ok();
+
     // --- C files (ggml-base + ggml-cpu) ---
     let mut c_build = cc::Build::new();
     c_build
         .flag_if_supported("-std=c11")
-        .flag_if_supported("-pthread")
-        .flag_if_supported("-march=native")
+        .flag_if_supported("-pthread");
+    if native_cpu {
+        c_build.flag_if_supported("-march=native");
+    }
+    c_build
         .flag_if_supported("-ffast-math")
         .flag_if_supported("-fno-finite-math-only")
         .define("_GNU_SOURCE", None);
@@ -64,8 +69,11 @@ fn main() {
     cpp_build
         .cpp(true)
         .flag_if_supported("-std=c++17")
-        .flag_if_supported("-pthread")
-        .flag_if_supported("-march=native")
+        .flag_if_supported("-pthread");
+    if native_cpu {
+        cpp_build.flag_if_supported("-march=native");
+    }
+    cpp_build
         .flag_if_supported("-ffast-math")
         .flag_if_supported("-fno-finite-math-only");
     for (name, val) in &common_defines {
@@ -139,7 +147,28 @@ fn main() {
         .expect("failed to write bindings");
 
     println!("cargo:rerun-if-changed=third_party/whisper.cpp/");
-    println!("cargo:rustc-link-search=native=/usr/lib/gcc/x86_64-linux-gnu/13");
+
+    // Scan for the highest installed gcc version so the build works on Debian 12
+    // (gcc-12), Ubuntu 22.04 (gcc-11), and bleeding-edge (gcc-14+).
+    let libstdcpp_dir = std::fs::read_dir("/usr/lib/gcc/x86_64-linux-gnu")
+        .ok()
+        .and_then(|entries| {
+            let mut versions: Vec<u32> = entries
+                .filter_map(|e| e.ok())
+                .filter_map(|e| {
+                    let path = e.path();
+                    if path.join("libstdc++.a").exists() {
+                        e.file_name().to_str()?.parse().ok()
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            versions.sort_unstable();
+            versions.pop().map(|v| format!("/usr/lib/gcc/x86_64-linux-gnu/{v}"))
+        })
+        .unwrap_or_else(|| "/usr/lib/gcc/x86_64-linux-gnu/13".into());
+    println!("cargo:rustc-link-search=native={libstdcpp_dir}");
     println!("cargo:rustc-link-lib=static=stdc++");
 
     // Parakeet engine (shared library, only parakeet_capi_* symbols exported)

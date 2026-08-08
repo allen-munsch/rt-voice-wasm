@@ -1,0 +1,178 @@
+{
+  "scenarios": [
+    {
+      "name": "run-and-refine-command",
+      "description": "User runs a test command, reads the failure, asks to fix the failing test, reruns — full edit-run loop",
+      "tier": 3,
+      "tags": ["cli", "shell", "iterate", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "run cargo test and tell me if anything fails",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}},
+        {"speak": "show me the full output of just the failing tests",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "the describe_items test is expecting '2 regular muffin' but the function now outputs '2 regular muffins' — fix the test to expect the plural",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "run just the describe_items tests to confirm",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}}
+      ],
+      "effect": {"command": "echo fixed", "contains": "fixed", "file_exists": null, "http": null}
+    },
+    {
+      "name": "compose-pipeline-iteratively",
+      "description": "User builds up a shell pipeline step by step, inspecting output at each stage to refine",
+      "tier": 3,
+      "tags": ["cli", "pipe", "compose", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "find all rust source files that mention the word transcribe",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "now count how many matches there are per file",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "sort them by file name and show me just the file names and counts, no other output",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "perfect, now do the same thing but only for files modified in the last week",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "git-commit-workflow",
+      "description": "Full git workflow by voice: check status, view diffs, stage selectively, write descriptive commit, verify log",
+      "tier": 3,
+      "tags": ["cli", "git", "commit", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "what's the git status of the project right now",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "show me the diff for just agent.rs",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "that looks correct, stage agent.rs and the new routing_market test file",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "commit with message: add word-boundary matching to IntentRouter with punctuation stripping and market replay tests",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "show me the last commit to confirm it looks right",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": {"command": "echo committed", "contains": "committed", "file_exists": null, "http": null}
+    },
+    {
+      "name": "build-fix-iterate",
+      "description": "User triggers build, gets errors, fixes them, rebuilds — the inner dev loop via voice",
+      "tier": 3,
+      "tags": ["cli", "build", "iterate", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "build the entire project and tell me if it succeeds",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 120000}},
+        {"speak": "show me only the first compilation error, not the warnings",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "open that file at the error line and suggest a fix",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "apply your suggested fix and rebuild",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 120000, "not_contains": "error"}},
+        {"speak": "great, now run the full test suite",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "process-diagnostic",
+      "description": "User investigates system state: running processes, resource usage, then drills into specifics",
+      "tier": 3,
+      "tags": ["cli", "process", "diagnostic", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "show me all running processes that are consuming more than one percent of CPU",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "focus on rust processes, show me their memory usage and how long they've been running",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "is there anything consuming more than a gigabyte of memory",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "kill the oldest rt-voice-server process if it's been running more than an hour",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "environment-audit",
+      "description": "User audits the dev environment — toolchain, paths, versions — then fixes a missing dependency",
+      "tier": 3,
+      "tags": ["cli", "env", "audit", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "what rust toolchain am I using and where is cargo installed",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "check if wasm-pack and wasm32 target are installed",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "the wasm32 target is missing, install it",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}},
+        {"speak": "verify the wasm32 target is now available",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "log-investigation",
+      "description": "User investigates application logs — searches, filters, correlates timestamps, finds root cause",
+      "tier": 3,
+      "tags": ["cli", "log", "diagnostic", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "show me the last fifty lines of the server log",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "filter for lines that contain error or warn, case insensitive",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "for each error line, show me the five lines before and after to get context",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "what's the most frequent error message and how many times does it appear",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "search the codebase for where that error is logged and show me the surrounding function",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "dependency-audit",
+      "description": "User audits cargo dependencies — checks for outdated crates, reads changelogs, upgrades selectively",
+      "tier": 3,
+      "tags": ["cli", "deps", "audit", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "list all cargo dependencies that have newer versions available",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "focus on serde and serde_json, what are the current and latest versions",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "upgrade serde_json to the latest version and run the tests",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}},
+        {"speak": "if all tests passed, also upgrade tokio and tungstenite",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}}
+      ],
+      "effect": null
+    }
+  ]
+}

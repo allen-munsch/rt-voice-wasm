@@ -1,0 +1,184 @@
+{
+  "scenarios": [
+    {
+      "name": "ci-dag-from-scratch",
+      "description": "User builds a CI pipeline DAG from scratch: lint, build, test, deploy — defining each node, wiring dependencies, running, fixing failures",
+      "tier": 3,
+      "tags": ["flowengine", "dag", "build", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "create a new DAG called ci-pipeline with three nodes: lint, build, and test, in that order",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "for lint, use cargo clippy. for build, use cargo build. for test, use cargo test.",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "add a deploy node after test that echoes deploying to staging",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "now run the full DAG and tell me each node's result as it finishes",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 120000, "not_contains": "error"}},
+        {"speak": "something failed in the build node, show me the node log",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "fix the build error, then restart the DAG from the build node onward",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 120000, "not_contains": "error"}}
+      ],
+      "effect": {"command": "echo flow-complete", "contains": "flow-complete", "file_exists": null, "http": null}
+    },
+    {
+      "name": "retry-with-backoff",
+      "description": "User defines a flaky deployment flow with retry logic, observes failures, tunes retry parameters",
+      "tier": 3,
+      "tags": ["flowengine", "retry", "robustness", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "create a DAG called deploy that uploads to the server, then verifies the upload, then restarts the service",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "make the upload step retry up to three times with a five second delay between attempts",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "run it and tell me how many attempts the upload took",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}},
+        {"speak": "it took all three attempts, increase the retry count to five and use exponential backoff",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "run it again and compare the timing to the previous run",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "param-passing-pipeline",
+      "description": "User builds a DAG where each node consumes output from the previous — git branch → checkout → build → tag",
+      "tier": 3,
+      "tags": ["flowengine", "params", "pipeline", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "create a DAG called release where the first node gets the current git branch name",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "the second node should take the branch name from the first node and run git checkout on it",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "add a third node that builds the project, and a fourth node that creates a git tag with the version from the branch name",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "run the DAG and show me the output of each node as it passes data to the next",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}},
+        {"speak": "the tag creation should only run if the build succeeds, make that a conditional dependency",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "http-api-node",
+      "description": "User adds an HTTP API call as a DAG node — posts build status to Slack, reads response, branches on result",
+      "tier": 3,
+      "tags": ["flowengine", "http", "api", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "add an HTTP node to the ci-pipeline DAG that posts the build status to a webhook URL",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "the webhook URL is http colon slash slash localhost colon 8080 slash webhook and it should send a JSON body with the status and the branch name",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "make the HTTP node run in parallel with the deploy node, they don't depend on each other",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "if the HTTP call fails, the DAG should continue — don't block on notification failures",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "run the full DAG and tell me whether both the deploy and the notification completed",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "tts-feedback-loop",
+      "description": "User runs a long DAG — each node completion is spoken back via TTS so the user can monitor progress hands-free",
+      "tier": 3,
+      "tags": ["flowengine", "stream", "tts-feedback", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "run the full ci-pipeline DAG and speak each node's result as it finishes",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 120000, "not_contains": "error"}},
+        {"speak": "the test node failed, what was the failure message",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "skip the test node for now and continue from build to deploy",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}},
+        {"speak": "now go back and run just the test node with verbose output, speak the summary",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "abort-and-cleanup",
+      "description": "User aborts a running DAG mid-execution, inspects partial state, cleans up, restarts from scratch",
+      "tier": 3,
+      "tags": ["flowengine", "abort", "lifecycle", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "start the full deployment DAG",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "wait, stop it immediately, I realized the config is wrong",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "show me which nodes already ran and what state they left behind",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "clean up any partial state from the aborted run",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "now update the deploy node to use the staging environment and restart from the beginning",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "parallel-fanout",
+      "description": "User builds a fan-out DAG: one node splits into three parallel tasks, then a gather node collects results",
+      "tier": 3,
+      "tags": ["flowengine", "parallel", "fanout", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "create a DAG called benchmark that runs three benchmarks in parallel: whisper, moonshine, and parakeet",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "each benchmark node should just run the corresponding cargo bench command",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "add a gather node that waits for all three benchmarks and prints a comparison table",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "run it and tell me which engine was fastest and by how much",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 120000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "dag-persistence-and-replay",
+      "description": "User saves a DAG definition, modifies it later, and replays from a checkpoint",
+      "tier": 3,
+      "tags": ["flowengine", "persistence", "replay", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "save the ci-pipeline DAG to a file so I can reuse it later",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "now load the ci-pipeline DAG and add a notification node before the deploy step",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "run it — if the lint and build nodes passed last time, skip them and start from test",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 60000, "not_contains": "error"}},
+        {"speak": "save the updated DAG with a new name ci-pipeline-with-notify",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": {"command": "echo saved", "contains": "saved", "file_exists": null, "http": null}
+    }
+  ]
+}

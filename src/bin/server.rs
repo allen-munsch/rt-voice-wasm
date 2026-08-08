@@ -22,7 +22,7 @@ use rt_voice_wasm::parakeet::ParakeetEngine;
 use rt_voice_wasm::transport::{AudioTransport, RawWsTransport, TwilioTransport};
 use rt_voice_wasm::whisper::WhisperContext;
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use tokio::net::TcpListener;
 use tokio_tungstenite::accept_async;
@@ -48,7 +48,14 @@ struct Config {
     speed: f64,
     provider: Provider,
     agent_hook: Option<String>,
+    agent_type: AgentType,
     greeting: String,
+}
+
+#[derive(Clone, Copy)]
+enum AgentType {
+    Builtin,
+    Order,
 }
 
 fn parse_args() -> Config {
@@ -60,10 +67,13 @@ fn parse_args() -> Config {
         speed: 1.0,
         provider: Provider::Twilio,
         agent_hook: Some("./scripts/dirge-agent.sh".into()),
+        agent_type: AgentType::Builtin,
         greeting: CallConfig::default().greeting,
     };
 
     let mut i = 1;
+    let mut agent_flag_seen = false;
+    let mut hook_flag_seen = false;
     while i < args.len() {
         match args[i].as_str() {
             "--model" => {
@@ -116,6 +126,21 @@ fn parse_args() -> Config {
                 i += 1;
                 if i < args.len() {
                     cfg.agent_hook = Some(args[i].clone());
+                    hook_flag_seen = true;
+                }
+            }
+            "--agent" => {
+                i += 1;
+                agent_flag_seen = true;
+                if i < args.len() {
+                    cfg.agent_type = match args[i].as_str() {
+                        "builtin" => AgentType::Builtin,
+                        "order" => AgentType::Order,
+                        other => {
+                            eprintln!("unknown agent '{other}', using builtin");
+                            AgentType::Builtin
+                        }
+                    };
                 }
             }
             "--greeting" => {
@@ -135,6 +160,12 @@ fn parse_args() -> Config {
         }
         i += 1;
     }
+    // An explicit --agent (builtin|order) means the user wants a built-in
+    // agent, so drop the convenience default hook unless --agent-hook was
+    // also given explicitly (which keeps its documented precedence).
+    if agent_flag_seen && !hook_flag_seen {
+        cfg.agent_hook = None;
+    }
     cfg
 }
 
@@ -146,12 +177,13 @@ USAGE:
   rt-voice-server [FLAGS]
 
 FLAGS:
-  --engine NAME    STT engine: whisper or parakeet (default: whisper)
-  --model PATH     Model path (default: models/ggml-tiny.en-q5_1.bin for whisper)
+  --engine NAME    STT engine: moonshine, whisper, or parakeet (default: moonshine)
+  --model PATH     Model path (default: models/moonshine-tiny for moonshine)
   --port N         WebSocket listen port (default: 8080)
   --speed FACTOR   Audio speedup factor (default: 1.0, e.g. 1.5 = 50% faster)
   --provider NAME  Audio transport: twilio, vapi, or raw (default: twilio)
   --agent-hook CMD External process for routing decisions
+  --agent TYPE    Built-in agent: builtin (IntentRouter) or order (OrderFlow) [default: builtin]
   --greeting TEXT  Greeting message sent on call connect
   --help, -h       Show this message
 
@@ -161,6 +193,7 @@ PROVIDERS:
   raw     Raw 16-bit PCM over WebSocket — for custom integrations
 
 ENGINES:
+  moonshine Moonshine (ONNX Runtime) — lowest latency, streaming-optimized (default)
   whisper  whisper.cpp (GGML) — 3s window, VAD gating, overlap merge
   parakeet parakeet.cpp (GGML) — cache-aware streaming, built-in <EOU>, RTFx ~27x vs whisper on CPU
 
@@ -186,16 +219,16 @@ async fn main() {
     let cfg = parse_args();
 
     eprintln!("[model] loading from {}...", cfg.model);
-    let ctx: Arc<dyn SttEngine> = match cfg.engine {
-        Engine::Whisper => Arc::new(
+    let ctx: Arc<Mutex<dyn SttEngine>> = match cfg.engine {
+        Engine::Whisper => Arc::new(Mutex::new(
             WhisperContext::init_from_file(&cfg.model).expect("failed to load whisper model"),
-        ),
-        Engine::Parakeet => Arc::new(
+        )),
+        Engine::Parakeet => Arc::new(Mutex::new(
             ParakeetEngine::init_from_file(&cfg.model).expect("failed to load parakeet model"),
-        ),
-        Engine::Moonshine => Arc::new(
+        )),
+        Engine::Moonshine => Arc::new(Mutex::new(
             MoonshineEngine::init_from_dir(&cfg.model).expect("failed to load moonshine model"),
-        ),
+        )),
     };
 
     let call_cfg = CallConfig::default()
@@ -239,20 +272,28 @@ async fn main() {
                 Provider::Raw => Box::new(RawWsTransport::new(ws_stream)),
             };
 
-            let agent: Box<dyn rt_voice_wasm::agent::Agent> = if let Some(ref hook) = agent_hook
+            let agent: Arc<dyn rt_voice_wasm::agent::Agent> = if let Some(ref hook) = agent_hook
             {
                 match ProcessAgent::spawn(hook) {
                     Ok(pa) => {
                         eprintln!("[agent] using external process: {hook}");
-                        Box::new(pa)
+                        Arc::new(pa)
                     }
                     Err(e) => {
                         eprintln!("[agent] spawn failed: {e}, using builtin");
-                        Box::new(IntentRouter::new(default_rules()))
+                        Arc::new(IntentRouter::new(default_rules()))
                     }
                 }
             } else {
-                Box::new(IntentRouter::new(default_rules()))
+                match cfg.agent_type {
+                    AgentType::Order => {
+                        eprintln!("[agent] using order-flow state machine");
+                        Arc::new(rt_voice_wasm::agent::OrderFlowAgent::new(
+                            rt_voice_wasm::agent::default_menu(),
+                        ))
+                    }
+                    AgentType::Builtin => Arc::new(IntentRouter::new(default_rules())),
+                }
             };
 
             let mut handler = CallHandler::new(transport, ctx, agent, call_cfg);

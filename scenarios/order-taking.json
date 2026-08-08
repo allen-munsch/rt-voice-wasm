@@ -1,0 +1,360 @@
+{
+  "scenarios": [
+    {
+      "name": "new-order",
+      "description": "Customer places a new order with item and quantity",
+      "tier": 1,
+      "tags": [
+        "order",
+        "slot-fill",
+        "create"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I'd like to order a coffee",
+          "expect": {
+            "event": "agent_action",
+            "contains": "what size",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "large please",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "yes that's correct",
+          "expect": {
+            "event": "agent_action",
+            "contains": "order:",
+            "within_ms": 5000
+          }
+        }
+      ],
+      "effect": null
+    },
+    {
+      "name": "partial-slots",
+      "description": "Customer starts order with incomplete info — agent asks clarifying questions",
+      "tier": 1,
+      "tags": [
+        "order",
+        "slot-fill",
+        "clarify"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I'd like to order something",
+          "expect": {
+            "event": "agent_action",
+            "contains": "what would you like",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "a cappuccino",
+          "expect": {
+            "event": "agent_action",
+            "contains": "what size",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "medium",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "yes",
+          "expect": {
+            "event": "agent_action",
+            "contains": "order:",
+            "within_ms": 5000
+          }
+        }
+      ],
+      "effect": null
+    },
+    {
+      "name": "quantity-correction",
+      "description": "Customer corrects quantity mid-order — agent updates",
+      "tier": 1,
+      "tags": [
+        "order",
+        "correction",
+        "update"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I'd like to order a latte",
+          "expect": {
+            "event": "agent_action",
+            "contains": "what size",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "medium, actually make it two",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000,
+            "not_contains": "error"
+          }
+        },
+        {
+          "speak": "yes",
+          "expect": {
+            "event": "agent_action",
+            "contains": "order:",
+            "within_ms": 5000
+          }
+        }
+      ],
+      "effect": null
+    },
+    {
+      "name": "add-item",
+      "description": "Customer adds an item to an existing order",
+      "tier": 1,
+      "tags": [
+        "order",
+        "add",
+        "multi-item"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I'd like to order a large coffee",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "yes, and add a blueberry muffin",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000,
+            "not_contains": "error"
+          }
+        },
+        {
+          "speak": "yes",
+          "expect": {
+            "event": "agent_action",
+            "contains": "order:",
+            "within_ms": 5000
+          }
+        }
+      ],
+      "effect": null
+    },
+    {
+      "name": "remove-item",
+      "description": "Customer removes an item from the order",
+      "tier": 1,
+      "tags": [
+        "order",
+        "remove",
+        "update"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I'd like to order a large coffee",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "actually remove the coffee",
+          "expect": {
+            "event": "agent_action",
+            "contains": "removed",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "a small tea",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "yes",
+          "expect": {
+            "event": "agent_action",
+            "contains": "order:",
+            "within_ms": 5000
+          }
+        }
+      ],
+      "effect": null
+    },
+    {
+      "name": "confirm-and-finalize",
+      "description": "Customer confirms and the order is placed",
+      "tier": 1,
+      "tags": [
+        "order",
+        "confirm",
+        "finalize"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I'd like a medium hot chocolate",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "yes",
+          "expect": {
+            "event": "agent_action",
+            "contains": "order:",
+            "within_ms": 5000
+          }
+        }
+      ],
+      "effect": null
+    },
+    {
+      "name": "cancel",
+      "description": "Customer cancels the order mid-flow",
+      "tier": 1,
+      "tags": [
+        "order",
+        "cancel",
+        "lifecycle"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I'd like to order a large latte",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "no cancel that",
+          "expect": {
+            "event": "agent_action",
+            "contains": "cancelled",
+            "within_ms": 5000
+          }
+        }
+      ],
+      "effect": null
+    },
+    {
+      "name": "unknown-item-clarify",
+      "description": "Customer asks for an item not on the menu — agent clarifies",
+      "tier": 1,
+      "tags": [
+        "order",
+        "clarify",
+        "fallback"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I'd like a pizza",
+          "expect": {
+            "event": "agent_action",
+            "contains": "don't have",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "okay then a large coffee",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000
+          }
+        }
+      ],
+      "effect": null
+    },
+    {
+      "name": "interleaved-routing",
+      "description": "Order in progress, customer switches to escalation — order state persists",
+      "tier": 1,
+      "tags": [
+        "order",
+        "routing",
+        "interleaved"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I'd like to order a large coffee",
+          "expect": {
+            "event": "agent_action",
+            "contains": "confirm",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "actually I want to speak to a manager first",
+          "expect": {
+            "event": "agent_action",
+            "contains": "escalate",
+            "within_ms": 5000,
+            "not_contains": "error"
+          }
+        }
+      ],
+      "effect": null
+    }
+  ]
+}

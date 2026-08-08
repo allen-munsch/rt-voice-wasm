@@ -111,6 +111,69 @@ pub fn decode_mulaw_8k_to_16k(mulaw: &[u8]) -> Vec<i16> {
     out
 }
 
+/// Read a 16-bit mono PCM WAV file. Returns (samples, sample_rate).
+/// Handles only standard PCM files with a single fmt chunk.
+pub fn read_wav_i16(path: &str) -> Result<(Vec<i16>, u32), String> {
+    let data = std::fs::read(path).map_err(|e| format!("read {path}: {e}"))?;
+    if data.len() < 44 || &data[0..4] != b"RIFF" {
+        return Err("not a WAV file".into());
+    }
+    // Find fmt chunk
+    let fmt = find_chunk(&data, b"fmt ").ok_or("no fmt chunk")?;
+    let audio_format = u16_le(&data[fmt..]);
+    if audio_format != 1 {
+        return Err(format!("unsupported audio format {audio_format} (expected PCM=1)"));
+    }
+    let channels = u16_le(&data[fmt + 2..]);
+    let sample_rate = u32_le(&data[fmt + 4..]);
+    // byte_rate at fmt+8, block_align at fmt+12, bits_per_sample at fmt+14
+    let bits_per_sample = u16_le(&data[fmt + 14..]);
+    if bits_per_sample != 16 {
+        return Err(format!("expected 16-bit PCM, got {bits_per_sample}-bit"));
+    }
+    // Find data chunk
+    let data_start = find_chunk(&data, b"data").ok_or("no data chunk")?;
+    let data_size = u32_le(&data[data_start - 4..]) as usize;
+    let raw = &data[data_start..data_start + data_size];
+
+    let samples: Vec<i16> = raw
+        .chunks_exact(2)
+        .map(|c| i16::from_le_bytes([c[0], c[1]]))
+        .collect();
+    // Downmix to mono if stereo
+    if channels >= 2 {
+        let mono: Vec<i16> = samples.chunks_exact(channels as usize)
+            .map(|frame| {
+                let sum: i32 = frame.iter().map(|&s| s as i32).sum();
+                (sum / channels as i32) as i16
+            })
+            .collect();
+        Ok((mono, sample_rate))
+    } else {
+        Ok((samples, sample_rate))
+    }
+}
+
+fn find_chunk(data: &[u8], id: &[u8; 4]) -> Option<usize> {
+    let mut pos = 12;
+    while pos + 8 <= data.len() {
+        if &data[pos..pos + 4] == id {
+            return Some(pos + 8);
+        }
+        let size = u32_le(&data[pos + 4..]);
+        pos += 8 + size as usize + (size as usize & 1);
+    }
+    None
+}
+
+fn u16_le(data: &[u8]) -> u16 {
+    u16::from_le_bytes([data[0], data[1]])
+}
+
+fn u32_le(data: &[u8]) -> u32 {
+    u32::from_le_bytes([data[0], data[1], data[2], data[3]])
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -188,5 +251,39 @@ mod tests {
     fn speedup_empty() {
         let out = speedup(&[], 2.0);
         assert!(out.is_empty());
+    }
+
+    #[test]
+    fn read_wav_i16_mono_16k() {
+        use std::io::Write;
+        // Synthesize a minimal 16kHz mono 16-bit PCM WAV
+        let samples: Vec<i16> = vec![100, 200, 300, 400, 500];
+        let data_size = (samples.len() * 2) as u32;
+        let file_size = 36 + data_size;
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&file_size.to_le_bytes());
+        wav.extend_from_slice(b"WAVE");
+        // fmt chunk
+        wav.extend_from_slice(b"fmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes()); // chunk size
+        wav.extend_from_slice(&1u16.to_le_bytes());  // PCM
+        wav.extend_from_slice(&1u16.to_le_bytes());  // mono
+        wav.extend_from_slice(&16000u32.to_le_bytes()); // sample rate
+        wav.extend_from_slice(&32000u32.to_le_bytes()); // byte rate
+        wav.extend_from_slice(&2u16.to_le_bytes());  // block align
+        wav.extend_from_slice(&16u16.to_le_bytes()); // bits per sample
+        // data chunk
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&data_size.to_le_bytes());
+        for s in &samples {
+            wav.extend_from_slice(&s.to_le_bytes());
+        }
+        let path = "/tmp/test_read_wav_i16.wav";
+        std::fs::write(path, &wav).unwrap();
+        let (out, rate) = read_wav_i16(path).unwrap();
+        assert_eq!(rate, 16000);
+        assert_eq!(out, samples);
+        std::fs::remove_file(path).ok();
     }
 }
