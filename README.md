@@ -15,7 +15,8 @@ Three swappable backends behind a common `SttEngine` trait (`src/engine.rs`):
 | **Parakeet** | ggml via `libloading` | `parakeet_realtime_eou_120m-v1-q8_0.gguf` | End-of-utterance detection |
 
 Engines are loaded at runtime — no recompile to switch. The server selects via
-`--provider whisper|moonshine|parakeet`. Cross-engine comparison tests in
+`--engine whisper|moonshine|parakeet`; `--provider` selects the audio transport
+(twilio|vapi|raw). Cross-engine comparison tests in
 `tests/engine_tests.rs`.
 
 ## How it works
@@ -70,9 +71,9 @@ cargo build --bin rt-voice-server
     --port 8080
 
 # Switch engines:
-./target/debug/rt-voice-server --provider moonshine  # ONNX Runtime
-./target/debug/rt-voice-server --provider parakeet   # ggml, EOU detection
-./target/debug/rt-voice-server --provider whisper    # default, WASM-compatible
+./target/debug/rt-voice-server --engine moonshine  # ONNX Runtime (default)
+./target/debug/rt-voice-server --engine parakeet   # ggml, EOU detection
+./target/debug/rt-voice-server --engine whisper    # WASM-compatible
 ```
 
 Open `http://localhost:8000/receptionist.html` — click Connect, speak, and
@@ -95,6 +96,30 @@ transcript line to the process's **stdin** and reads a JSON action from its
 This works with any language or runtime — shell script, Python, Node, a Go
 binary, or dirge-code. The `scripts/dirge-agent.sh` script bridges dirge's
 JSON output to this protocol, but you can swap it for your own:
+
+### Built-in agents
+
+Two built-in agents are available without an external process, selected via
+`--agent builtin` (default) or `--agent order`:
+
+- **IntentRouter** (`builtin`) — first-match-wins keyword/phrase routing with
+  configurable rules. Single-word triggers match whole words only (stripping
+  punctuation: `"agent!"` matches `"agent"`), while multi-word phrases use
+  substring matching (`"not working"` in `"it is not working"`). Falls back
+  to a prompt if nothing matches.
+- **OrderFlowAgent** (`order`) — deterministic state machine for voice-driven
+  orders: slot fill (item → size → confirm) → structured JSON payload. Handles
+  corrections (`"actually make it three"`), add/remove items, cancel, and
+  unknown-item clarification. Quantities parsed from words (`"two lattes"`)
+  with word-boundary safety (`"someone"` doesn't match `"one"`).
+
+```bash
+# IntentRouter (default — phone receptionist routing)
+./target/debug/rt-voice-server --provider raw --agent builtin
+
+# OrderFlowAgent (voice-driven café ordering)
+./target/debug/rt-voice-server --provider raw --agent order
+```
 
 ```bash
 # Use a Python agent
@@ -135,8 +160,37 @@ Voice commands dirge can handle:
 - "Run the tests and tell me how many passed"
 - "Rename the handle_connection function to handle_socket"
 
-See [TODOs.md](./TODOs.md) for next steps: flowengine integration, continuous
-voice loop, context awareness, multi-modal fallback.
+## Scenario Gym
+
+A catalog of 50+ voice-to-action scenarios in `scenarios/` — spoken phrases
+paired with expected agent events. Three tiers of testing:
+
+| Tier | Mode | Runtime |
+|------|------|---------|
+| 1 | Deterministic Rust replay | `cargo test --test routing_market` |
+| 2 | E2E: TTS → server → STT → assert | `jolt scripts/tts_harness.jolt --tier 2` |
+| 3 | Dirge/LLM + tool effects | Tier 2 + `effect` assertions |
+
+**Domain files:** `phone-routing.json`, `order-taking.json`, `coding-companion.json`,
+`cli-programmer.json`, `tool-calling-flowengine.json`, `tool-calling-mcp.json`,
+`a2a.json`, `ux-quality.json`.
+
+```bash
+# One-shot orchestrator
+./scripts/run_scenario_gym.sh --dry-run        # tier-1 Rust replay only
+./scripts/run_scenario_gym.sh --tier 2 --agent order  # full e2e
+
+# Targeted run
+jolt scripts/tts_harness.jolt --tier 1 --filter phone
+```
+
+The `ws-send` binary supports `--ts` for per-event latency instrumentation:
+
+```bash
+./target/debug/ws-send ws://localhost:8080 test.wav --ts
+# Output: T 123 {"event":"agent_action","text":"transfer to agent"}
+#          ^^^ ms since connect
+```
 
 ## Architecture
 
@@ -149,14 +203,18 @@ voice loop, context awareness, multi-modal fallback.
 | Audio utilities (μ-law, resampler) | `src/audio.rs` |
 | Streaming pipeline (windows, VAD, overlap merge) | `src/stream.rs` |
 | Composable call handler | `src/call.rs` |
-| Agent system (router, fn, process) | `src/agent.rs` |
+| Agent system (IntentRouter, OrderFlow, Process) | `src/agent.rs` |
 | WebSocket transports (Twilio, raw) | `src/transport.rs` |
 | WebSocket server binary | `src/bin/server.rs` |
+| ws-send latency probe binary | `src/bin/ws_send.rs` |
 | wasm-bindgen exports | `src/wasm.rs` |
 | Module routing | `src/lib.rs` |
 | Build (cc + bindgen) | `build.rs` |
 | Engine integration tests | `tests/engine_tests.rs` |
 | Golden audio regression | `tests/golden_audio.rs` |
+| CallHandler integration tests | `tests/call_handler.rs` |
+| Deterministic scenario replay | `tests/routing_market.rs` |
+| Scenario definitions (50+ turns) | `scenarios/` |
 | Web harness & voice agent demo | `web/` |
 | Convenience scripts | `scripts/` |
 
@@ -166,7 +224,11 @@ voice loop, context awareness, multi-modal fallback.
 - Emscripten SDK (for whisper.wasm build)
 - [Jolt](https://github.com/jolt-lang/jolt) (for dev server and test harness)
 - [dirge](https://dirge-code.github.io/) (optional, for the voice agent demo)
+- Python 3 + edge-tts (for tier-2+ scenario gym)
 
 ## Roadmap
 
-See [TODOs.md](./TODOs.md) — Jolt migration, coding companion, MCP/flowengine integration.
+- Scenario Gym tier-3: dirge/LLM agents + effect assertions (file_exists, http)
+- Flowengine DAG orchestration from voice commands
+- Multi-turn context awareness in streaming pipeline
+- See [TODOs.md](./TODOs.md) for full backlog
