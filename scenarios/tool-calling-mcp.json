@@ -1,0 +1,178 @@
+{
+  "scenarios": [
+    {
+      "name": "knowledge-base-query",
+      "description": "User searches a knowledge base for error information, drills into results, asks follow-up questions",
+      "tier": 3,
+      "tags": ["mcp", "tool", "search", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "search the knowledge base for rust error code E0308 mismatched types",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "show me the full article for the top result",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "does the article mention any common fixes for when this happens with closures",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "search the codebase for places where we have this same pattern and might hit this error",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}}
+      ],
+      "effect": {"command": "echo found", "contains": "found", "file_exists": null, "http": null}
+    },
+    {
+      "name": "file-operations-chain",
+      "description": "User chains file operations: read, analyze, transform, write — each step's output feeds the next",
+      "tier": 3,
+      "tags": ["mcp", "file", "chain", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "read the file src slash agent dot rs and show me all the public function signatures",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "which of those functions don't have doc comments yet",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "add doc comments to the three most important undocumented functions",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "now create a new file called API dot md in the docs directory with a summary of all public functions",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "multi-tool-orchestration",
+      "description": "User orchestrates three tools in sequence to accomplish a task: grep → file read → git blame → report",
+      "tier": 3,
+      "tags": ["mcp", "multi-tool", "sequence", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "find all places in the codebase where we call unwrap on a result type",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "for each one, show me the surrounding five lines of code so I can see the context",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "use git blame to find out who wrote each unwrap and when",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "create a report file listing each unwrap with its location, author, and date",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "now replace the three most dangerous unwraps with proper error handling",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "error-recovery-with-fallback",
+      "description": "MCP tool call fails — agent tries alternative approach, fails again, asks user for direction",
+      "tier": 3,
+      "tags": ["mcp", "error", "recovery", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "connect to the database and show me the list of active users",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "try reading from the read replica instead",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "that's also down, can you check if the database server is even running",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "ok it's not running, send an alert to the ops channel",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "also check when the database was last backed up and tell me the most recent backup time",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "permission-escalation-flow",
+      "description": "User requests a dangerous operation — agent asks for confirmation, user provides it, operation proceeds with safeguards",
+      "tier": 3,
+      "tags": ["mcp", "permission", "safety", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "delete all files matching star dot log in the logs directory",
+         "expect": {"event": "agent_action", "contains": "confirm", "within_ms": 10000}},
+        {"speak": "yes, I confirm, delete them all",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "wait, did it already delete them? show me what's left in the logs directory",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "good, now compress the remaining log files into a single archive",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "data-pipeline-via-tools",
+      "description": "User builds an ad-hoc data pipeline: extract data with one tool, transform with another, load with a third — all via voice",
+      "tier": 3,
+      "tags": ["mcp", "pipeline", "etl", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "extract all test result data from the last benchmark run",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "now parse that and show me only the entries where the real time factor is above zero point five",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "format that as a markdown table sorted from slowest to fastest",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "write the table to bench slash latest dot md and also send it to the performance slack channel",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "config-management",
+      "description": "User manages project configuration via MCP tools — read, validate, update, validate again",
+      "tier": 3,
+      "tags": ["mcp", "config", "validate", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "show me the current project configuration from the mcp server",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "the default model path should be models slash moonshine dash tiny, update it",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "now validate the entire configuration against the schema",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "save the updated configuration and show me the diff from what it was before",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "resource-inspection-chain",
+      "description": "User inspects MCP resources hierarchically: list → read specific → follow reference → read child",
+      "tier": 3,
+      "tags": ["mcp", "resource", "inspect", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "list all available resources on the mcp server",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "read the resource at path slash config slash server dot json",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "that config references a model file, check if that file actually exists on disk",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "it doesn't exist, show me what model files are actually available in the models directory",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "update the config to use the first available model file",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    }
+  ]
+}

@@ -1,0 +1,201 @@
+{
+  "scenarios": [
+    {
+      "name": "add-test-coverage",
+      "description": "User asks dirge to add tests for untested functions — agent surveys code, proposes targets, writes tests, runs them",
+      "tier": 3,
+      "tags": ["coding", "tdd", "dirge", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "look at agent.rs and tell me which functions don't have tests yet",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "add tests for describe_items and parse_quantity first, those sound important",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000}},
+        {"speak": "run the tests and tell me how many passed",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}},
+        {"speak": "great, now add a test for the edge case where parse_quantity gets an empty string",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}}
+      ],
+      "effect": {"command": "grep -c '#[test]' src/agent.rs", "contains": "", "file_exists": null, "http": null}
+    },
+    {
+      "name": "fix-type-error-iteratively",
+      "description": "User reports a compile error — dirge reads the file, proposes fix, iterates when first attempt fails",
+      "tier": 3,
+      "tags": ["coding", "fix", "iterate", "dirge", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "I'm getting error E0308 mismatched types in call.rs line 242, can you look at it",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "try that fix",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000}},
+        {"speak": "it's still failing with the same error, what else could it be",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "ok that second approach sounds better, apply it",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "build and run call_handler tests to confirm it's fixed",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 45000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "refactor-extract-trait",
+      "description": "User asks dirge to extract an Agent trait from concrete implementations — full plan-approve-execute-verify cycle",
+      "tier": 3,
+      "tags": ["coding", "refactor", "multi-step", "dirge"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "I want to extract an SttEngine trait from the engine implementations, there are three backends",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "yes, survey the code first, show me your plan before making changes",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "that plan looks good, go ahead and implement it",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 45000, "not_contains": "error"}},
+        {"speak": "now add doc comments to the new trait methods",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "run the full test suite to make sure nothing broke",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 45000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "git-workflow-voice",
+      "description": "User manages git entirely by voice — status check, selective staging, descriptive commit",
+      "tier": 3,
+      "tags": ["coding", "git", "dirge", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "show me what files have changed since the last commit",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "stage agent.rs and call.rs but leave the other files alone",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "commit with the message: add word-boundary matching to IntentRouter and Action::Order variant",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "now show me the commit I just made with the full diff",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": {"command": "echo committed", "contains": "committed", "file_exists": null, "http": null}
+    },
+    {
+      "name": "debug-runtime-panic",
+      "description": "User reports a runtime panic — dirge reads backtrace, asks clarifying questions, adds instrumentation, identifies fix",
+      "tier": 3,
+      "tags": ["coding", "debug", "dirge", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 600,
+      "turns": [
+        {"speak": "the server panicked with index out of bounds in stream.rs line 156, here's what happened: the window slide step was larger than the buffer",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "it happens when the audio chunk is smaller than the window, maybe a very short call",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "I like the guard approach, add that and also log a warning when this happens",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "now write a unit test that reproduces the short-chunk scenario to make sure it doesn't panic",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "run that specific test and confirm it passes",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "multi-file-rename",
+      "description": "User asks to rename a symbol across the entire project — agent surveys usage, confirms scope, applies refactor",
+      "tier": 3,
+      "tags": ["coding", "refactor", "dirge", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "rename the struct CallConfig to CallSettings everywhere in the project",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "yes, rename it everywhere including tests and the benchmark binary",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}},
+        {"speak": "build the project and run the tests to verify nothing broke",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 45000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "add-feature-from-spec",
+      "description": "User describes a new feature verbally — agent asks for clarifications, proposes implementation plan, executes, iterates",
+      "tier": 3,
+      "tags": ["coding", "feature", "plan", "dirge", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "I want to add a retry mechanism to the transcribe function so it retries up to three times on transient errors",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "exponential backoff sounds right, use one second initial delay and double it each time",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000}},
+        {"speak": "start implementing that plan",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}},
+        {"speak": "add a config option so the max retries can be set from the command line",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "now add tests for the retry logic including the backoff timing",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}},
+        {"speak": "run all the tests one final time",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 45000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "code-review-voice",
+      "description": "User asks for code review of recent changes — agent reads diff, reports issues, user picks which to fix, agent fixes and verifies",
+      "tier": 3,
+      "tags": ["coding", "review", "dirge", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "review the uncommitted changes in agent.rs and tell me if there are any issues",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000}},
+        {"speak": "fix the word-boundary issue you mentioned, the other two seem fine for now",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "actually, also add a safety check for empty input in trigger_contains like you suggested",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "build and run the agent tests to confirm both fixes work",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "explain-and-document",
+      "description": "User asks agent to explain a complex function, then document it — knowledge transfer via voice",
+      "tier": 3,
+      "tags": ["coding", "documentation", "dirge", "multi-turn"],
+      "voice": "en-US-GuyNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "explain what the StreamingPipeline run method does, step by step",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "what happens if the audio is silent for more than the window duration",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "add doc comments to the run method explaining the sliding window and silence gate behavior",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "also add a module-level doc comment at the top of stream.rs explaining the overall pipeline architecture",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}}
+      ],
+      "effect": null
+    }
+  ]
+}

@@ -15,6 +15,8 @@ pub enum Action {
     Escalate(String),
     Hangup,
     Continue,
+    /// Emit a structured order payload (item, quantity, size, etc.).
+    Order(serde_json::Value),
 }
 
 /// The Agent trait: any type that can route a transcript to an Action.
@@ -48,14 +50,32 @@ impl IntentRouter {
 impl Agent for IntentRouter {
     fn route(&self, text: &str) -> Action {
         let lower = text.to_lowercase();
+        let words: Vec<&str> = lower.split_whitespace().collect();
         for rule in &self.rules {
             for trigger in &rule.triggers {
-                if lower.contains(&trigger.to_lowercase()) {
+                let trigger_lower = trigger.to_lowercase();
+                if trigger_contains(&lower, &trigger_lower, &words) {
                     return rule.action.clone();
                 }
             }
         }
-        Action::Continue
+        // Catch-all so an unmatched utterance gets a prompt reply, not dead air.
+        Action::Respond("I didn't quite catch that. You can ask for a live agent, support, or a manager.".into())
+    }
+}
+
+/// Match a trigger against the utterance. Single-word triggers match whole
+/// words only, stripping punctuation so "agent!" matches "agent";
+/// multi-word triggers use substring matching so phrases like
+/// "not working" still work in "it is not working".
+fn trigger_contains(text: &str, trigger: &str, words: &[&str]) -> bool {
+    if trigger.contains(' ') {
+        text.contains(trigger)
+    } else {
+        words.iter().any(|w| {
+            let trimmed = w.trim_matches(|c: char| !c.is_alphanumeric());
+            trimmed == trigger
+        })
     }
 }
 
@@ -74,6 +94,275 @@ impl<F: Fn(&str) -> Action + Send + Sync> Agent for FnAgent<F> {
     fn route(&self, text: &str) -> Action {
         (self.f)(text)
     }
+}
+
+/// Deterministic order-flow state machine: slot fill → confirm → finalize.
+///
+/// Handles new orders, corrections ("actually make it three"), add/remove
+/// items, confirm, cancel, and unknown-item clarification.
+pub struct OrderFlowAgent {
+    state: std::sync::Mutex<OrderState>,
+    menu: Vec<String>,
+}
+
+#[derive(Debug, Clone)]
+struct OrderState {
+    items: Vec<OrderItem>,
+    phase: OrderPhase,
+}
+
+#[derive(Debug, Clone)]
+struct OrderItem {
+    name: String,
+    quantity: u32,
+    size: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+enum OrderPhase {
+    AwaitingItem,
+    AwaitingSize,
+    AwaitingConfirmation,
+    Confirmed,
+    Cancelled,
+}
+
+impl OrderFlowAgent {
+    pub fn new(menu: Vec<String>) -> Self {
+        OrderFlowAgent {
+            state: std::sync::Mutex::new(OrderState {
+                items: Vec::new(),
+                phase: OrderPhase::AwaitingItem,
+            }),
+            menu,
+        }
+    }
+
+    fn find_item(&self, text: &str) -> Option<String> {
+        let lower = text.to_lowercase();
+        self.menu.iter().find(|item| lower.contains(&item.to_lowercase())).cloned()
+    }
+}
+
+impl Agent for OrderFlowAgent {
+    fn route(&self, text: &str) -> Action {
+        let lower = text.to_lowercase();
+        let mut state = self.state.lock().unwrap();
+
+        // Cancel anywhere
+        if lower.contains("cancel") {
+            state.phase = OrderPhase::Cancelled;
+            return Action::Respond("Order cancelled. Is there anything else?".into());
+        }
+
+        // Escalate to a human anywhere in the flow
+        if lower.contains("manager")
+            || lower.contains("supervisor")
+            || lower.contains("escalate")
+            || lower.contains("speak to a person")
+        {
+            return Action::Escalate("manager".into());
+        }
+
+        match &state.phase {
+            OrderPhase::AwaitingItem => {
+                // Check for an existing item being modified
+                let is_correction = lower.contains("actually") || lower.contains("make it") || lower.contains("change");
+                let is_add = lower.contains("add") && !lower.contains("address");
+                let is_remove = lower.contains("remove");
+
+                if state.items.is_empty() || is_correction || is_add || is_remove {
+                    if is_remove && !state.items.is_empty() {
+                        state.items.pop();
+                        if state.items.is_empty() {
+                            return Action::Respond("Removed. What would you like to order?".into());
+                        }
+                        return Action::Respond(format!(
+                            "Removed. Your order now has {}. Confirm?",
+                            describe_items(&state.items)
+                        ));
+                    }
+
+                    if let Some(item) = self.find_item(text) {
+                        let qty = parse_quantity(text).unwrap_or(1);
+                        // Check size
+                        let size = if lower.contains("large") { Some("large".into()) }
+                            else if lower.contains("medium") { Some("medium".into()) }
+                            else if lower.contains("small") { Some("small".into()) }
+                            else { None };
+
+                        if is_add && !state.items.is_empty() {
+                            state.items.push(OrderItem { name: item, quantity: qty, size });
+                            state.phase = OrderPhase::AwaitingConfirmation;
+                            return Action::Respond(format!(
+                                "Added. Your order now has {}. Confirm?",
+                                describe_items(&state.items)
+                            ));
+                        }
+
+                        state.items = vec![OrderItem { name: item, quantity: qty, size: size.clone() }];
+
+                        if size.is_none() {
+                            state.phase = OrderPhase::AwaitingSize;
+                            return Action::Respond("What size — small, medium, or large?".into());
+                        }
+                        state.phase = OrderPhase::AwaitingConfirmation;
+                        return Action::Respond(format!(
+                            "{} {}. Confirm with yes or make changes.",
+                            describe_items(&state.items),
+                            if state.items.len() == 1 { "— is that correct?" } else { "" }
+                        ));
+                    }
+
+                    return Action::Respond("I don't have that on the menu. We have coffee, latte, cappuccino, hot chocolate, tea, and muffins. What would you like?".into());
+                }
+            }
+            OrderPhase::AwaitingSize => {
+                if let Some(size) = if lower.contains("large") { Some("large") }
+                    else if lower.contains("medium") { Some("medium") }
+                    else if lower.contains("small") { Some("small") }
+                    else { None }
+                {
+                    for item in &mut state.items {
+                        if item.size.is_none() {
+                            item.size = Some(size.to_string());
+                        }
+                        if let Some(qty) = parse_quantity(&lower) {
+                            item.quantity = qty;
+                        }
+                    }
+                    state.phase = OrderPhase::AwaitingConfirmation;
+                    return Action::Respond(format!(
+                        "{}. Confirm?",
+                        describe_items(&state.items)
+                    ));
+                }
+                // Re-specify item in this phase
+                if let Some(item) = self.find_item(text) {
+                    let qty = parse_quantity(text).unwrap_or(1);
+                    state.items = vec![OrderItem { name: item, quantity: qty, size: None }];
+                    return Action::Respond(format!("Updated to {}. What size?", describe_items(&state.items)));
+                }
+            }
+            OrderPhase::AwaitingConfirmation => {
+                let is_add = lower.contains("add") && !lower.contains("address");
+                let is_remove = lower.contains("remove");
+
+                if is_remove && !state.items.is_empty() {
+                    state.items.pop();
+                    if state.items.is_empty() {
+                        return Action::Respond("Removed. What would you like to order?".into());
+                    }
+                    return Action::Respond(format!(
+                        "Removed. Your order now has {}. Confirm?",
+                        describe_items(&state.items)
+                    ));
+                }
+
+                if is_add {
+                    if let Some(item) = self.find_item(text) {
+                        let qty = parse_quantity(text).unwrap_or(1);
+                        state.items.push(OrderItem { name: item, quantity: qty, size: None });
+                        return Action::Respond(format!(
+                            "Added. Your order now has {}. Confirm?",
+                            describe_items(&state.items)
+                        ));
+                    }
+                }
+
+                if lower.contains("yes") || lower.contains("correct") || lower.contains("yeah") || lower.contains("yep") {
+                    state.phase = OrderPhase::Confirmed;
+                    let payload = serde_json::json!({
+                        "items": state.items.iter().map(|i| serde_json::json!({
+                            "item": i.name,
+                            "quantity": i.quantity,
+                            "size": i.size,
+                        })).collect::<Vec<_>>(),
+                    });
+                    return Action::Order(payload);
+                }
+                // Handle size specification
+                if let Some(size) = if lower.contains("large") { Some("large") }
+                    else if lower.contains("medium") { Some("medium") }
+                    else if lower.contains("small") { Some("small") }
+                    else { None }
+                {
+                    for item in &mut state.items {
+                        if item.size.is_none() {
+                            item.size = Some(size.to_string());
+                        }
+                    }
+                    return Action::Respond(format!(
+                        "{}. Confirm?",
+                        describe_items(&state.items)
+                    ));
+                }
+                // Handle re-specifying item
+                if let Some(item) = self.find_item(text) {
+                    let qty = parse_quantity(text).unwrap_or(1);
+                    state.items = vec![OrderItem {
+                        name: item,
+                        quantity: qty,
+                        size: None,
+                    }];
+                    return Action::Respond(format!("Updated to {}. What size?", describe_items(&state.items)));
+                }
+            }
+            OrderPhase::Confirmed => {
+                return Action::Respond("Your order is already confirmed. Is there anything else?".into());
+            }
+            OrderPhase::Cancelled => {
+                state.phase = OrderPhase::AwaitingItem;
+                state.items.clear();
+                return Action::Respond("Starting fresh. What would you like to order?".into());
+            }
+        }
+
+        Action::Continue
+    }
+}
+
+fn parse_quantity(text: &str) -> Option<u32> {
+    let number_words: Vec<(&str, u32)> = vec![
+        ("one", 1), ("two", 2), ("three", 3), ("four", 4), ("five", 5),
+        ("six", 6), ("seven", 7), ("eight", 8), ("nine", 9), ("ten", 10),
+    ];
+    let words: Vec<&str> = text.split_whitespace().collect();
+    for (word, val) in &number_words {
+        if words.iter().any(|w| {
+            let trimmed = w.trim_matches(|c: char| !c.is_alphanumeric());
+            trimmed == *word
+        }) {
+            return Some(*val);
+        }
+    }
+    None
+}
+
+fn describe_items(items: &[OrderItem]) -> String {
+    let parts: Vec<String> = items.iter().map(|i| {
+        let size_str = i.size.as_deref().unwrap_or("regular");
+        let plural = if i.quantity > 1 { "s" } else { "" };
+        if i.quantity > 1 {
+            format!("{} {} {}{}", i.quantity, size_str, i.name, plural)
+        } else {
+            format!("{} {}{}", size_str, i.name, plural)
+        }
+    }).collect();
+    parts.join(", ")
+}
+
+/// Default café menu for order-flow agent.
+pub fn default_menu() -> Vec<String> {
+    vec![
+        "coffee".into(),
+        "latte".into(),
+        "cappuccino".into(),
+        "hot chocolate".into(),
+        "tea".into(),
+        "muffin".into(),
+        "croissant".into(),
+    ]
 }
 
 /// Spawns an external process for routing decisions.
@@ -210,6 +499,9 @@ impl ProcessAgent {
             if obj.get("Hangup").is_some() {
                 return Action::Hangup;
             }
+            if let Some(order) = obj.get("Order") {
+                return Action::Order(order.clone());
+            }
         }
         Action::Continue
     }
@@ -264,18 +556,18 @@ pub fn default_rules() -> Vec<Rule> {
         },
         Rule {
             triggers: vec![
+                "president".into(), "manager".into(), "supervisor".into(),
+                "escalate".into(), "complaint".into(),
+            ],
+            action: Action::Escalate("caller requested supervisor".into()),
+        },
+        Rule {
+            triggers: vec![
                 "support".into(), "help".into(), "issue".into(),
                 "problem".into(), "broken".into(), "not working".into(),
                 "error".into(), "bug".into(),
             ],
             action: Action::Transfer("support".into()),
-        },
-        Rule {
-            triggers: vec![
-                "president".into(), "manager".into(), "supervisor".into(),
-                "escalate".into(), "complaint".into(),
-            ],
-            action: Action::Escalate("caller requested supervisor".into()),
         },
         Rule {
             triggers: vec![
@@ -325,10 +617,14 @@ mod tests {
     }
 
     #[test]
-    fn route_continue_on_unmatched() {
+    fn route_unmatched_gets_fallback_reply() {
         let router = IntentRouter::new(default_rules());
         let result = router.route("the weather is nice today");
-        assert!(matches!(result, Action::Continue));
+        assert!(
+            matches!(&result, Action::Respond(r) if r.contains("didn't quite catch")),
+            "unmatched utterance should get the catch-all reply, got: {:?}",
+            result
+        );
     }
 
     #[test]
@@ -411,5 +707,245 @@ mod tests {
             ProcessAgent::parse_action(""),
             Action::Continue
         ));
+    }
+
+    // -- word-boundary matching tests ---------------------------------------
+
+    #[test]
+    fn word_boundary_not_today_is_not_no_rule() {
+        let router = IntentRouter::new(default_rules());
+        let result = router.route("not today, thanks");
+        // "not" is a single-word trigger — must not match inside "not today"
+        assert!(
+            !matches!(&result, Action::Respond(r) if r.contains("something else")),
+            "'not today, thanks' should not trigger the 'not' rule, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn phrase_not_working_still_matches() {
+        let router = IntentRouter::new(default_rules());
+        let result = router.route("it is not working");
+        // "not working" is a multi-word phrase trigger — must still match
+        assert!(
+            matches!(result, Action::Transfer(ref d) if d == "support"),
+            "'it is not working' should transfer to support, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn word_boundary_nope_still_matches() {
+        let router = IntentRouter::new(default_rules());
+        let result = router.route("nope");
+        // "nope" is a single-word trigger — should match the whole utterance
+        assert!(
+            matches!(&result, Action::Respond(r) if r.contains("something else")),
+            "'nope' should trigger the no rule, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn word_boundary_yes_in_yes_please() {
+        let router = IntentRouter::new(default_rules());
+        let result = router.route("yes please");
+        // "yes" is a single-word trigger — should match the whole word "yes"
+        assert!(
+            matches!(&result, Action::Respond(r) if r.contains("Great")),
+            "'yes please' should trigger the yes rule, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn word_boundary_agent_not_in_agentic() {
+        let router = IntentRouter::new(default_rules());
+        let result = router.route("this is agentic behavior");
+        // "agent" should only match as a whole word, not inside "agentic";
+        // nothing else matches, so the catch-all fallback replies
+        assert!(
+            matches!(&result, Action::Respond(r) if r.contains("didn't quite catch")),
+            "'agentic' should not trigger 'agent' rule, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn word_boundary_broken_still_matches() {
+        let router = IntentRouter::new(default_rules());
+        let result = router.route("my computer is broken");
+        // "broken" is a single-word trigger in the support rule
+        assert!(
+            matches!(result, Action::Transfer(ref d) if d == "support"),
+            "'my computer is broken' should transfer to support, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn word_boundary_agent_with_exclamation() {
+        let router = IntentRouter::new(default_rules());
+        let result = router.route("I want to speak to an agent!");
+        // "agent!" should match trigger "agent" — punctuation is not a word boundary
+        assert!(
+            matches!(result, Action::Transfer(ref d) if d == "agent"),
+            "'I want to speak to an agent!' should transfer to agent, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn word_boundary_manager_with_trailing_comma() {
+        let router = IntentRouter::new(default_rules());
+        let result = router.route("get me the manager,");
+        // "manager," should match trigger "manager"
+        assert!(
+            matches!(result, Action::Escalate(_)),
+            "'get me the manager,' should escalate, got: {:?}",
+            result
+        );
+    }
+
+    #[test]
+    fn word_boundary_help_with_question_mark() {
+        let router = IntentRouter::new(default_rules());
+        let result = router.route("can you help?");
+        // "help?" should match trigger "help" → support
+        assert!(
+            matches!(result, Action::Transfer(ref d) if d == "support"),
+            "'can you help?' should transfer to support, got: {:?}",
+            result
+        );
+    }
+
+    // -- Order action parsing -----------------------------------------------
+
+    #[test]
+    fn parse_order_action() {
+        let action = ProcessAgent::parse_action(r#"{"Order": {"item": "coffee", "quantity": 2}}"#);
+        assert!(matches!(action, Action::Order(ref v) if v["item"] == "coffee"));
+    }
+
+    // -- parse_quantity word-boundary tests ---------------------------------
+
+    #[test]
+    fn parse_quantity_detects_number_words() {
+        assert_eq!(parse_quantity("two lattes"), Some(2));
+        assert_eq!(parse_quantity("make it three please"), Some(3));
+        assert_eq!(parse_quantity("I'd like a coffee"), None);
+    }
+
+    #[test]
+    fn parse_quantity_rejects_embedded_words() {
+        // "one" inside "someone", "phone", "alone" must not match
+        assert_eq!(parse_quantity("talk to someone"), None);
+        assert_eq!(parse_quantity("call by phone"), None);
+        assert_eq!(parse_quantity("leave me alone"), None);
+    }
+
+    #[test]
+    fn parse_quantity_with_punctuation() {
+        assert_eq!(parse_quantity("three!"), Some(3));
+        assert_eq!(parse_quantity("give me two."), Some(2));
+    }
+
+    // -- describe_items tests ------------------------------------------------
+
+    #[test]
+    fn describe_items_singular() {
+        let items = vec![OrderItem { name: "coffee".into(), quantity: 1, size: Some("large".into()) }];
+        assert_eq!(describe_items(&items), "large coffee");
+    }
+
+    #[test]
+    fn describe_items_multiple_quantity() {
+        let items = vec![OrderItem { name: "latte".into(), quantity: 3, size: Some("medium".into()) }];
+        assert_eq!(describe_items(&items), "3 medium lattes");
+    }
+
+    #[test]
+    fn describe_items_multiple_items() {
+        let items = vec![
+            OrderItem { name: "coffee".into(), quantity: 1, size: Some("large".into()) },
+            OrderItem { name: "muffin".into(), quantity: 2, size: None },
+        ];
+        assert_eq!(describe_items(&items), "large coffee, 2 regular muffins");
+    }
+
+    // -- OrderFlowAgent state machine ---------------------------------------
+
+    #[test]
+    fn order_flow_new_order() {
+        let agent = OrderFlowAgent::new(default_menu());
+        // Start with an item
+        let action = agent.route("I'd like a coffee");
+        assert!(
+            matches!(&action, Action::Respond(r) if r.contains("size")),
+            "should ask for size, got: {:?}", action
+        );
+    }
+
+    #[test]
+    fn order_flow_with_size() {
+        let agent = OrderFlowAgent::new(default_menu());
+        agent.route("I'd like a large coffee");
+        let action = agent.route("yes");
+        assert!(
+            matches!(action, Action::Order(_)),
+            "should emit order, got: {:?}", action
+        );
+    }
+
+    #[test]
+    fn order_flow_size_clarify() {
+        let agent = OrderFlowAgent::new(default_menu());
+        agent.route("I'd like a latte");
+        let action = agent.route("large");
+        assert!(
+            matches!(&action, Action::Respond(r) if r.contains("Confirm")),
+            "should confirm after size, got: {:?}", action
+        );
+    }
+
+    #[test]
+    fn order_flow_confirm() {
+        let agent = OrderFlowAgent::new(default_menu());
+        agent.route("I'd like a large coffee");
+        let action = agent.route("yes");
+        assert!(matches!(action, Action::Order(_)), "should emit order");
+    }
+
+    #[test]
+    fn order_flow_correction() {
+        let agent = OrderFlowAgent::new(default_menu());
+        agent.route("I'd like a coffee");
+        let action = agent.route("actually make it a large latte");
+        assert!(
+            matches!(&action, Action::Respond(r) if r.contains("Confirm")),
+            "should confirm after correction, got: {:?}", action
+        );
+    }
+
+    #[test]
+    fn order_flow_cancel() {
+        let agent = OrderFlowAgent::new(default_menu());
+        agent.route("I'd like a coffee");
+        let action = agent.route("cancel");
+        assert!(
+            matches!(&action, Action::Respond(r) if r.contains("cancelled")),
+            "should cancel, got: {:?}", action
+        );
+    }
+
+    #[test]
+    fn order_flow_unknown_item() {
+        let agent = OrderFlowAgent::new(default_menu());
+        let action = agent.route("I'd like a pizza");
+        assert!(
+            matches!(&action, Action::Respond(r) if r.contains("What would you like")),
+            "should prompt for known item, got: {:?}", action
+        );
     }
 }

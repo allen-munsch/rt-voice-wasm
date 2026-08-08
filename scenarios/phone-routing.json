@@ -1,0 +1,372 @@
+{
+  "scenarios": [
+    {
+      "name": "route-to-agent",
+      "description": "Customer asks for a human agent",
+      "tier": 1,
+      "tags": [
+        "routing",
+        "transfer",
+        "receptionist"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I want to speak to a human agent please",
+          "expect": {
+            "event": "agent_action",
+            "contains": "transfer",
+            "within_ms": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "route-to-support",
+      "description": "Customer describes account trouble",
+      "tier": 1,
+      "tags": [
+        "routing",
+        "transfer",
+        "receptionist"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I have a problem with my account",
+          "expect": {
+            "event": "agent_action",
+            "contains": "transfer",
+            "within_ms": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "escalate-to-manager",
+      "description": "Customer demands manager",
+      "tier": 1,
+      "tags": [
+        "routing",
+        "escalate",
+        "receptionist"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I want to speak to your manager right now",
+          "expect": {
+            "event": "agent_action",
+            "contains": "escalate",
+            "within_ms": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "multi-turn-escalation",
+      "description": "Greeting, then problem, then anger — escalates",
+      "tier": 1,
+      "tags": [
+        "routing",
+        "multi-turn",
+        "escalate",
+        "receptionist"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "Hello, who is this?",
+          "expect": {
+            "event": "agent_action",
+            "contains": "respond",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "what can you do?",
+          "expect": {
+            "event": "agent_action",
+            "contains": "receptionist",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "No, I want to speak to your manager right now!",
+          "expect": {
+            "event": "agent_action",
+            "contains": "escalate",
+            "within_ms": 5000,
+            "not_contains": "error"
+          }
+        }
+      ]
+    },
+    {
+      "name": "goodbye",
+      "description": "Customer says thanks and hangs up",
+      "tier": 1,
+      "tags": [
+        "routing",
+        "goodbye",
+        "receptionist"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "thanks for your help goodbye",
+          "expect": {
+            "event": "agent_action",
+            "contains": "respond",
+            "within_ms": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "capabilities-explained",
+      "description": "Customer asks what the system can do",
+      "tier": 1,
+      "tags": [
+        "routing",
+        "capabilities",
+        "receptionist"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "what can you do",
+          "expect": {
+            "event": "agent_action",
+            "contains": "receptionist",
+            "within_ms": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "ambiguous-fallback",
+      "description": "Customer says something off-topic — should not error",
+      "tier": 2,
+      "tags": [
+        "routing",
+        "fallback",
+        "robustness"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "the weather is nice today",
+          "expect": {
+            "event": "agent_action",
+            "contains": "respond",
+            "within_ms": 5000,
+            "not_contains": "error"
+          }
+        }
+      ]
+    },
+    {
+      "name": "barge-in-correction",
+      "description": "Customer interrupts mid-greeting with a correction",
+      "tier": 2,
+      "tags": [
+        "routing",
+        "barge-in",
+        "robustness"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+15%",
+      "pitch": "+0Hz",
+      "pause_ms": 200,
+      "turns": [
+        {
+          "speak": "hello who is this actually never mind I want to speak to an agent",
+          "expect": {
+            "event": "agent_action",
+            "contains": "transfer",
+            "within_ms": 5000,
+            "not_contains": "error"
+          }
+        }
+      ]
+    },
+    {
+      "name": "multi-intent",
+      "description": "Customer expresses multiple intents in one utterance — should pick highest priority",
+      "tier": 1,
+      "tags": [
+        "routing",
+        "multi-intent",
+        "priority"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I have a problem and I need to speak to a manager",
+          "expect": {
+            "event": "agent_action",
+            "contains": "escalate",
+            "within_ms": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "polite-no",
+      "description": "Customer politely declines — should not trigger false no-rule",
+      "tier": 1,
+      "tags": [
+        "routing",
+        "word-boundary",
+        "robustness"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "not today thanks I'll call back later",
+          "expect": {
+            "event": "agent_action",
+            "contains": "respond",
+            "within_ms": 5000,
+            "not_contains": "something else"
+          }
+        }
+      ]
+    },
+    {
+      "name": "keyword-overlap-priority",
+      "description": "Help and manager both in one utterance — escalate wins (higher priority in rules)",
+      "tier": 1,
+      "tags": [
+        "routing",
+        "priority",
+        "keyword-overlap"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "I need help and I want to speak to a manager",
+          "expect": {
+            "event": "agent_action",
+            "contains": "escalate",
+            "within_ms": 5000
+          }
+        }
+      ]
+    },
+    {
+      "name": "repeated-utterance",
+      "description": "Customer repeats the same request — should not duplicate events",
+      "tier": 2,
+      "tags": [
+        "routing",
+        "dedup",
+        "robustness"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 300,
+      "turns": [
+        {
+          "speak": "I want to speak to an agent",
+          "expect": {
+            "event": "agent_action",
+            "contains": "transfer",
+            "within_ms": 5000
+          }
+        },
+        {
+          "speak": "I want to speak to an agent",
+          "expect": {
+            "event": "agent_action",
+            "contains": "transfer",
+            "within_ms": 5000,
+            "not_contains": "error"
+          }
+        }
+      ]
+    },
+    {
+      "name": "trailing-flush",
+      "description": "Short utterance near disconnect — transcript must not be lost",
+      "tier": 2,
+      "tags": [
+        "routing",
+        "flush",
+        "robustness"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 100,
+      "turns": [
+        {
+          "speak": "goodbye",
+          "expect": {
+            "event": "agent_action",
+            "contains": "respond",
+            "within_ms": 5000,
+            "not_contains": "error"
+          }
+        }
+      ]
+    },
+    {
+      "name": "hangup-intent",
+      "description": "Customer explicitly says hang up",
+      "tier": 2,
+      "tags": [
+        "routing",
+        "hangup",
+        "lifecycle"
+      ],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 500,
+      "turns": [
+        {
+          "speak": "that's all I need please hang up",
+          "expect": {
+            "event": "agent_action",
+            "contains": "respond",
+            "within_ms": 5000,
+            "not_contains": "error"
+          }
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,186 @@
+{
+  "scenarios": [
+    {
+      "name": "specialist-handoff-with-context",
+      "description": "User describes a technical problem — receptionist hands off to tech specialist with full conversation context, specialist picks up seamlessly",
+      "tier": 3,
+      "tags": ["a2a", "handoff", "context", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "I'm having trouble with the whisper model, it's producing garbled output on short audio clips",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "I've already tried increasing the window size and that didn't help",
+         "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "the audio is 16 kilohertz mono PCM, about two seconds long, sent as raw WebSocket binary frames",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "yes I've verified the sample rate matches by checking the WAV header",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "that fixed it, thanks, what was wrong",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "rejection-with-fallback",
+      "description": "Specialist agent rejects the handoff — the request doesn't match their domain — receptionist falls back and offers alternatives",
+      "tier": 3,
+      "tags": ["a2a", "reject", "fallback", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "transfer me to billing, I have a question about my invoice",
+         "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 10000}},
+        {"speak": "I just want to know why I was charged twice last month",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "yes please, connect me to accounts instead",
+         "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "I have the invoice number here, it's INV dash two zero two six dash zero four one two",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "parallel-agent-consensus",
+      "description": "User asks a question that requires input from three specialists — agents run in parallel, receptionist synthesizes their responses",
+      "tier": 3,
+      "tags": ["a2a", "parallel", "collaboration", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "I need to know: can we deploy the new voice model to production this week",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "check with the infrastructure team, the QA team, and the security team at the same time",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 30000, "not_contains": "error"}},
+        {"speak": "so infrastructure says yes, QA says no because of the accuracy regression, and security has a pending audit — is that right",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "ask QA if there's a workaround that would let us deploy to staging at least",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "what's the consolidated recommendation from all three teams",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "remote-http-agent",
+      "description": "User asks a question that requires calling an external HTTP A2A agent — request marshalled, response integrated into conversation",
+      "tier": 3,
+      "tags": ["a2a", "http", "remote", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "ask the weather agent what the forecast is for San Francisco tomorrow",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000}},
+        {"speak": "also ask what the air quality index will be",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "so should I bike to work or drive",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "actually, ask the weather agent for the hourly breakdown so I can see when the rain starts",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}}
+      ],
+      "effect": {"http": "http://localhost:8080/health", "command": null, "file_exists": null}
+    },
+    {
+      "name": "timeout-and-recovery",
+      "description": "Remote agent times out — local agent detects the timeout, informs user clearly, offers alternatives",
+      "tier": 3,
+      "tags": ["a2a", "timeout", "recovery", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "query the remote analytics agent for the monthly active user count",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000}},
+        {"speak": "try once more with a longer timeout",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 20000, "not_contains": "error"}},
+        {"speak": "ok it's not responding, can you check if the analytics service is even up",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "it's definitely down, use the cached report from yesterday instead and tell me that number",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "also file an incident ticket for the analytics team",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "escalation-chain",
+      "description": "User's issue escalates through three tiers: receptionist → specialist → senior engineer → resolution",
+      "tier": 3,
+      "tags": ["a2a", "escalation", "chain", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "the voice server is crashing every ten minutes in production, this is urgent",
+         "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 10000}},
+        {"speak": "it's a segfault in the ggml library during matrix multiplication",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "we're already on the latest build, it started after we enabled the parakeet engine",
+         "expect": {"event": "agent_action", "contains": "escalate", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "I can try disabling parakeet and falling back to moonshine for now, would that be a temporary fix",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "ok do it, switch production to moonshine and open a bug for the parakeet crash",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 15000, "not_contains": "error"}},
+        {"speak": "confirm the switch was applied and the service is stable",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "context-preservation-across-handoffs",
+      "description": "User's context must survive multiple handoffs — each new agent picks up without the user repeating information",
+      "tier": 3,
+      "tags": ["a2a", "context", "handoff", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "hi, I'm Jane from the mobile team, I need help with the voice API, my app ID is mobile dash three seven",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "the transcribe endpoint returns empty results for audio files under three seconds",
+         "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "what's the current minimum audio length for the voice API",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "transfer me to someone who can change that threshold",
+         "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "I don't want to repeat myself, do you have my context from the previous agent",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    },
+    {
+      "name": "agent-discovery-and-routing",
+      "description": "User asks for help with something the receptionist doesn't handle — agent discovers available specialist agents and routes to the best match",
+      "tier": 3,
+      "tags": ["a2a", "discovery", "routing", "multi-turn"],
+      "voice": "en-US-AriaNeural",
+      "rate": "+0%",
+      "pitch": "+0Hz",
+      "pause_ms": 800,
+      "turns": [
+        {"speak": "I need to schedule a database migration for next Tuesday at 3 AM",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000}},
+        {"speak": "I don't know which team handles that, can you figure it out",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "yes, transfer me to the database ops team",
+         "expect": {"event": "agent_action", "contains": "transfer", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "it's the user profiles database, migrating from Postgres 15 to 17",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}},
+        {"speak": "we need less than 30 minutes of downtime and a rollback plan",
+         "expect": {"event": "agent_action", "contains": "respond", "within_ms": 10000, "not_contains": "error"}}
+      ],
+      "effect": null
+    }
+  ]
+}

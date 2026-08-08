@@ -18,12 +18,13 @@ use tokio_tungstenite::tungstenite::Message;
 async fn main() {
     let args: Vec<String> = std::env::args().collect();
 
-    let ws_url = args.get(1).expect("usage: ws-send <ws-url> <wav-path> [--pad-secs N] [--chunk-ms N] [--timeout-s N]");
+    let ws_url = args.get(1).expect("usage: ws-send <ws-url> <wav-path> [--pad-secs N] [--chunk-ms N] [--timeout-s N] [--ts]");
     let wav_path = args.get(2).expect("usage: ws-send <ws-url> <wav-path> ...");
 
     let pad_secs: f64 = parse_flag(&args, "--pad-secs", 6.0);
     let chunk_ms: usize = parse_flag(&args, "--chunk-ms", 100);
     let timeout_s: f64 = parse_flag(&args, "--timeout-s", 25.0);
+    let ts_mode = args.contains(&"--ts".to_string());
 
     let samples = read_wav_padded(wav_path, pad_secs);
     let chunk_samples = 16000 * chunk_ms / 1000;
@@ -43,6 +44,12 @@ async fn main() {
 
     let (mut write, mut read) = ws.split();
 
+    let connect_time = if ts_mode {
+        Some(std::time::Instant::now())
+    } else {
+        None
+    };
+
     for chunk in &chunks {
         write
             .send(Message::Binary(chunk.clone()))
@@ -58,7 +65,12 @@ async fn main() {
             match msg {
                 Ok(Message::Text(text)) => {
                     if text.contains("\"event\"") {
-                        println!("{}", text);
+                        if let Some(start) = connect_time {
+                            let ms = start.elapsed().as_millis();
+                            println!("T {} {}", ms, text);
+                        } else {
+                            println!("{}", text);
+                        }
                     }
                 }
                 Ok(Message::Close(_)) => break,
