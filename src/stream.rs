@@ -25,10 +25,12 @@ impl StreamingPipeline {
     }
 
     pub fn with_speed(sample_rate: u32, speed_factor: f64) -> Self {
-        let window_secs = 3; // 3s window — enough context for whisper, fast first response
-        let step_secs = 1;   // 1s step
-        let window_samples = (sample_rate as f64 * window_secs as f64) as usize;
-        let step_samples = (sample_rate as f64 * step_secs as f64) as usize;
+        Self::with_params(sample_rate, speed_factor, 3.0, 1.0)
+    }
+
+    pub fn with_params(sample_rate: u32, speed_factor: f64, window_secs: f64, step_secs: f64) -> Self {
+        let window_samples = (sample_rate as f64 * window_secs) as usize;
+        let step_samples = (sample_rate as f64 * step_secs) as usize;
         StreamingPipeline {
             sample_rate,
             window_samples,
